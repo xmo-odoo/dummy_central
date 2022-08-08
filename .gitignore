@@ -1,0 +1,8 @@
+/.idea
+/users.json
+**/*.pack
+/target
+/.python-version
+pytest.ini
+/.vscode
+.mypy_cache/

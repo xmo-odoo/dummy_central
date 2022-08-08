@@ -1,0 +1,7 @@
+target-version = "py310"
+
+[format]
+quote-style = "preserve"
+
+[lint]
+ignore = ["E501"]

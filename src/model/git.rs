@@ -1,0 +1,658 @@
+use std::collections::{HashMap, HashSet, VecDeque};
+
+use gix_actor::Signature;
+use gix_diff::tree::{Recorder, State, recorder::Change};
+use gix_hash::{ObjectId, oid};
+use gix_object::{
+    Commit, CommitRef, Kind, Object, ObjectRef, TagRef, Tree, TreeRefIter,
+    bstr::BStr, tree::Entry,
+};
+use rusqlite::OptionalExtension;
+use sha1::{Digest, Sha1};
+
+use super::{Token, Write, repos::Network};
+
+/// [`gix_object`]'s `loose_header` const size, not sure why 28 (I count about 12)
+const HEADER_SIZE: usize = 28;
+
+/// Extacts the `sha` column from a [`rusqlite::Row`] and converts it to a
+/// [`gix_object::ObjectId`]
+fn sha_to_oid(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectId> {
+    <[u8; 20]>::try_from(row.get_ref("sha")?.as_blob()?)
+        .map(ObjectId::from)
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Blob,
+                e.into(),
+            )
+        })
+}
+
+pub mod refs {
+    use github_types::repos::RulesetRule;
+    use gix_hash::{ObjectId, oid};
+    use rusqlite::OptionalExtension;
+
+    use crate::model::{
+        Token, Write,
+        repos::{
+            Repository, RepositoryId, read_ruleset_rules, rulesets_for_branch,
+        },
+    };
+
+    pub fn resolve<M>(
+        tx: &Token<M>,
+        repo: RepositoryId,
+        name: &str,
+    ) -> Option<ObjectId> {
+        tx.query_row(
+            "
+            SELECT sha FROM refs
+            LEFT JOIN objects ON (id = object)
+            WHERE repository = ? AND name = ?
+        ",
+            (*repo, name),
+            super::sha_to_oid,
+        )
+        .optional()
+        .unwrap()
+    }
+
+    pub fn list<M>(
+        tx: &Token<M>,
+        repo: RepositoryId,
+        mut f: impl FnMut(&str, &oid),
+    ) {
+        tx.prepare(
+            "
+            SELECT name, sha FROM refs
+            LEFT JOIN objects ON (id = object)
+            WHERE repository = ?
+            ORDER BY name
+        ",
+        )
+        .unwrap()
+        .query_map([*repo], |row| {
+            f(
+                row.get_ref("name")?.as_str()?,
+                oid::from_bytes_unchecked(row.get_ref("sha")?.as_bytes()?),
+            );
+            Ok(())
+        })
+        .unwrap()
+        .for_each(Result::unwrap);
+    }
+
+    #[must_use]
+    pub fn create(
+        tx: &Token<Write>,
+        repo: &Repository,
+        name: &str,
+        oid: &oid,
+    ) -> bool {
+        if let Some(n) = name.strip_prefix("refs/heads/")
+            && rulesets_for_branch(tx, repo, n).any(|r| {
+                read_ruleset_rules(tx, r.id)
+                    .into_iter()
+                    .any(|rule| matches!(rule, RulesetRule::Creation))
+            })
+        {
+            false
+        } else {
+            assert_eq!(
+                tx.execute(
+                    "
+                INSERT INTO refs (name, repository, object)
+                VALUES (?, ?, (SELECT id FROM objects WHERE sha = ?))
+            ",
+                    (name, *repo.id, oid.as_bytes())
+                )
+                .unwrap(),
+                1
+            );
+            true
+        }
+    }
+
+    pub fn set(tx: &Token<Write>, repo: RepositoryId, name: &str, to: &oid) {
+        tx.execute(
+            "
+        UPDATE refs SET object = to_.id
+        FROM objects to_
+        WHERE refs.repository = ?
+            AND refs.name = ?
+            AND to_.sha = ?
+        ",
+            (*repo, name, to.as_bytes()),
+        )
+        .unwrap();
+    }
+
+    #[must_use]
+    pub fn update(
+        tx: &Token<Write>,
+        repo: &Repository,
+        name: &str,
+        from: &oid,
+        to: &oid,
+    ) -> bool {
+        if let Some(n) = name.strip_prefix("refs/heads/")
+            && rulesets_for_branch(tx, repo, n).any(|r| {
+                read_ruleset_rules(tx, r.id)
+                    .into_iter()
+                    .any(|rule| matches!(rule, RulesetRule::Update { .. }))
+            })
+        {
+            false
+        } else {
+            assert_eq!(
+                tx.execute(
+                    "
+                    UPDATE refs SET object = to_.id
+                    FROM objects from_, objects to_
+                    WHERE refs.repository = ?
+                    AND refs.name = ?
+                    AND from_.sha = ?
+                    AND refs.object = from_.id
+                    AND to_.sha = ?
+                    ",
+                    (*repo.id, name, from.as_bytes(), to.as_bytes())
+                )
+                .unwrap(),
+                1
+            );
+            true
+        }
+    }
+
+    pub fn delete(
+        tx: &Token<Write>,
+        repo: RepositoryId,
+        name: &str,
+        oid: &oid,
+    ) {
+        assert_eq!(
+            tx.execute(
+                "
+                    DELETE FROM refs
+                    WHERE repository = ?
+                      AND name = ?
+                      AND object = (SELECT id FROM objects WHERE sha = ?)
+                ",
+                (*repo, name, oid.as_bytes())
+            )
+            .unwrap(),
+            1
+        );
+    }
+
+    pub fn delete_unchecked(
+        tx: &Token<Write>,
+        repo: RepositoryId,
+        name: &str,
+    ) -> bool {
+        tx.execute(
+            "
+                DELETE FROM refs
+                WHERE refs.repository = ? AND refs.name = ?
+            ",
+            (*repo, name),
+        )
+        .unwrap()
+            == 1
+    }
+}
+
+pub fn get_objects<M>(tx: &Token<M>, network: Network) -> Vec<ObjectId> {
+    tx.prepare("SELECT sha FROM objects WHERE network = ?")
+        .unwrap()
+        .query_map([*network], sha_to_oid)
+        .unwrap()
+        .map(Result::unwrap)
+        .collect()
+}
+
+#[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
+pub struct ObjectDbId(pub(super) i64);
+impl std::ops::Deref for ObjectDbId {
+    type Target = i64;
+    fn deref(&self) -> &i64 {
+        &self.0
+    }
+}
+
+pub fn get<M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+) -> Option<ObjectDbId> {
+    tx.query_row(
+        "SELECT id FROM objects WHERE network = ? AND sha = ?",
+        (*network, oid.as_bytes()),
+        |row| row.get("id").map(ObjectDbId),
+    )
+    .optional()
+    .unwrap()
+}
+
+pub fn deref<M>(tx: &Token<M>, id: ObjectDbId) -> ObjectId {
+    tx.query_row("SELECT sha FROM objects WHERE id = ?", [*id], sha_to_oid)
+        .unwrap()
+}
+
+pub fn load<M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+) -> Option<gix_object::Object> {
+    tx.query_row(
+        "SELECT data FROM objects WHERE network = ? AND sha = ?",
+        (*network, oid.as_bytes()),
+        |row| {
+            let data = row.get_ref("data")?.as_blob()?;
+            Ok(ObjectRef::from_loose(data).unwrap().to_owned())
+        },
+    )
+    .optional()
+    .unwrap()
+}
+
+pub fn get_in<'buf, M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+    buf: &'buf mut Vec<u8>,
+) -> Option<(gix_object::Kind, &'buf [u8])> {
+    tx.query_row(
+        "SELECT data FROM objects WHERE network = ? AND sha = ?",
+        (*network, oid.as_bytes()),
+        |row| {
+            buf.extend(row.get_ref("data")?.as_blob()?);
+            Ok(())
+        },
+    )
+    .optional()
+    .unwrap()?;
+
+    let (kind, _, consumed) = gix_object::decode::loose_header(buf).ok()?;
+    Some((kind, &buf[consumed..]))
+}
+
+pub fn store(
+    tx: &Token<Write>,
+    network: Network,
+    object: impl gix_object::WriteTo,
+) -> ObjectId {
+    let mut obj = Vec::new();
+    object
+        .write_to(&mut obj)
+        .expect("Write to vec probably can't fail");
+    if object.kind() == Kind::Commit {
+        assert!(!obj.contains(&0));
+    }
+    let mut to = Vec::with_capacity(HEADER_SIZE + obj.len());
+    // writes object header
+    to.extend(object.loose_header());
+    // writes the rest of the ~~owl~~ object
+    to.extend(obj);
+    // computes oid and inserts serialized object
+    let oid = ObjectId::from(<[u8; 20]>::from(Sha1::digest(&to)));
+
+    tx.execute(
+        "
+        INSERT INTO objects (network, sha, data) VALUES (?, ?, ?)
+        ON CONFLICT DO NOTHING
+    ",
+        (*network, oid.as_bytes(), to),
+    )
+    .unwrap();
+
+    oid
+}
+
+/// Resolves oid until a tree object, returns the tree, fails if it reached a
+/// dead-end (a blob) or an oid which doesn't exist
+pub fn load_tree<M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+) -> Option<Vec<Entry>> {
+    let mut object_id = oid.to_owned();
+    loop {
+        object_id = match load(tx, network, &object_id)? {
+            Object::Tree(t) => return Some(t.entries),
+            Object::Blob(_) => return None,
+            Object::Commit(c) => c.tree,
+            Object::Tag(t) => t.target,
+        }
+    }
+}
+
+pub fn find_blob<M>(
+    tx: &Token<M>,
+    network: Network,
+    path: &str,
+    mut entries: Vec<Entry>,
+) -> Option<(ObjectId, gix_object::Blob)> {
+    // FIXME: when creating trees, need to check for empty filenames
+    for p in path.split('/') {
+        let entry = std::mem::take(&mut entries)
+            .into_iter()
+            .find(|e| e.filename == BStr::new(p.as_bytes()))?;
+
+        entries = match load(tx, network, &entry.oid)? {
+            Object::Tree(t) => t.entries,
+            Object::Blob(b) => return Some((entry.oid, b)),
+            Object::Commit(_) | Object::Tag(_) => break,
+        }
+    }
+    None
+}
+
+pub fn find_tree<M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+) -> Option<Vec<Entry>> {
+    load(tx, network, oid)
+        .and_then(|o| o.try_into_tree().ok())
+        .map(|t| t.entries)
+}
+
+pub fn log<'a, M>(
+    token: &'a Token<M>,
+    network: Network,
+    oid: &oid,
+) -> Option<Log<'a, M>> {
+    load(token, network, oid).map(|_| Log::new(token, network, oid))
+}
+
+pub struct Log<'a, M> {
+    token: &'a Token<M>,
+    network: Network,
+    seen: HashSet<ObjectId>,
+    to_check: VecDeque<ObjectId>,
+}
+impl<M> Log<'_, M> {
+    fn new<'s>(token: &'s Token<M>, network: Network, oid: &oid) -> Log<'s, M> {
+        Log {
+            token,
+            network,
+            seen: HashSet::with_capacity(8),
+            to_check: VecDeque::from([oid.to_owned()]),
+        }
+    }
+}
+
+impl<M> Iterator for Log<'_, M> {
+    type Item = ObjectId;
+    fn next(&mut self) -> Option<ObjectId> {
+        if let Some(next) = self.to_check.pop_front() {
+            if self.seen.insert(next) {
+                self.to_check.extend(
+                    load(self.token, self.network, &next)
+                        .expect("log-linked objects to exist")
+                        .into_commit()
+                        .parents,
+                );
+            }
+            return Some(next);
+        }
+        None
+    }
+}
+
+struct Finder<'a, M>(&'a Token<M>, Network);
+
+impl<M> gix_object::Find for Finder<'_, M> {
+    fn try_find<'a>(
+        &self,
+        id: &gix_hash::oid,
+        buffer: &'a mut Vec<u8>,
+    ) -> Result<Option<gix_object::Data<'a>>, gix_object::find::Error> {
+        Ok(get_in(self.0, self.1, id, buffer)
+            .map(|(kind, data)| gix_object::Data { kind, data }))
+    }
+}
+
+pub fn merge(
+    tx: &Token<Write>,
+    network: Network,
+    message: String,
+    left: &oid,
+    right: &oid,
+    author: Signature,
+    committer: Signature,
+) -> Result<ObjectId, MergeError> {
+    let merge_base = find_merge_base(tx, network, left, right)
+        .ok_or(MergeError::NoCommonAncestor)?;
+    // FIXME: if oid1 is the merge base, this is an ff merge, if oid2 is the
+    //        merge base, this is already merged
+
+    let updates = {
+        // FIXME: should be recursive resolutions as those are commits!
+        let mut _base_buf = Vec::new();
+        let base = resolve_tree_in(tx, network, &merge_base, &mut _base_buf)?;
+        let mut _left_buf = Vec::new();
+        let left_tree = resolve_tree_in(tx, network, left, &mut _left_buf)?;
+        let mut _right_buf = Vec::new();
+        let right_tree = resolve_tree_in(tx, network, right, &mut _right_buf)?;
+
+        let mut changes1 = Recorder::default();
+        gix_diff::tree(
+            base,
+            left_tree,
+            State::default(),
+            Finder(tx, network),
+            &mut changes1,
+        )
+        .map_err(|_| MergeError::NotFound)?;
+        let mut updates = HashMap::with_capacity(changes1.records.len());
+        for c in changes1.records {
+            updates.insert(path(&c).to_owned(), c);
+        }
+
+        let mut changes2 = Recorder::default();
+        gix_diff::tree(
+            base,
+            right_tree,
+            State::default(),
+            Finder(tx, network),
+            &mut changes2,
+        )
+        .map_err(|_| MergeError::NotFound)?;
+
+        for c2 in changes2.records {
+            let p = path(&c2);
+            if let Some(c1) = updates.get(p) {
+                if c1 == &c2 {
+                    continue;
+                }
+                return Err(MergeError::Conflict);
+            }
+            updates.insert(p.to_owned(), c2);
+        }
+        updates
+    };
+
+    let mut new_tree: Tree = load(tx, network, &merge_base)
+        .and_then(|o| o.try_into_commit().ok())
+        .map(|c| c.tree)
+        .and_then(|t| load(tx, network, &t))
+        .and_then(|o| o.try_into_tree().ok())
+        .expect("we just got it!");
+
+    for (_path, change) in updates {
+        match change {
+            Change::Addition {
+                entry_mode,
+                oid,
+                path,
+                ..
+            } => {
+                assert!(!new_tree.entries.iter().any(|e| e.filename == path));
+                new_tree.entries.push(Entry {
+                    mode: entry_mode,
+                    filename: path,
+                    oid,
+                });
+            }
+            Change::Deletion {
+                entry_mode: _,
+                oid: _,
+                path,
+                ..
+            } => {
+                // TODO: validate that the suppression worked (?)
+                new_tree.entries.retain(|e| e.filename != path);
+            }
+            Change::Modification {
+                previous_entry_mode: _,
+                previous_oid,
+                entry_mode,
+                oid,
+                path,
+            } => {
+                let e = new_tree
+                    .entries
+                    .iter_mut()
+                    .find(|e| e.filename == path)
+                    .unwrap();
+                assert_eq!(e.oid, previous_oid);
+                assert_eq!(e.mode, entry_mode);
+                e.oid = oid;
+            }
+        }
+    }
+    new_tree
+        .entries
+        .sort_by(|e1, e2| e1.filename.cmp(&e2.filename));
+
+    let tid = store(tx, network, new_tree);
+    let cid = store(
+        tx,
+        network,
+        Commit {
+            tree: tid,
+            parents: vec![left.to_owned(), right.to_owned()].into(),
+            author,
+            committer,
+            encoding: None,
+            message: message.into(),
+            extra_headers: Vec::new(),
+        },
+    );
+
+    Ok(cid)
+}
+
+/// Returns a tree buffer for the oid, or fails with the relevant merge error
+/// (NotFound or InvalidObjectType)
+fn get_tree_in<'buf, M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+    buf: &'buf mut Vec<u8>,
+) -> Result<TreeRefIter<'buf>, MergeError> {
+    get_in(tx, network, oid, &mut *buf)
+        .ok_or(MergeError::NotFound)
+        .and_then(|(kind, buf)| {
+            if kind == Kind::Tree {
+                Ok(TreeRefIter::from_bytes(buf))
+            } else {
+                Err(MergeError::InvalidObjectType(kind))
+            }
+        })
+}
+
+/// Resolves oid until a tree object, returns the tree, fails if it reaches a
+/// dead end (blob) or an oid which does not exist
+fn resolve_tree_in<'buf, M>(
+    tx: &Token<M>,
+    network: Network,
+    oid: &oid,
+    buf: &'buf mut Vec<u8>,
+) -> Result<TreeRefIter<'buf>, MergeError> {
+    let mut object_id = oid.to_owned();
+    loop {
+        buf.clear();
+        object_id = match get_in(tx, network, &object_id, buf)
+            .ok_or(MergeError::NotFound)?
+        {
+            (Kind::Tree, data) => {
+                // this mess is sadly necessary because `buf` contains the
+                // loose object header so can't be used directly, but if we use
+                // `data` then we hit the "return borrow from mutable in loop"
+                // thing (#70255), therefore we need to recompute the tree
+                // object slice directly from `buf`
+                let left = data.len();
+                let consumed = buf.len() - left;
+                return Ok(TreeRefIter::from_bytes(&buf[consumed..]));
+            }
+            (Kind::Blob, _) => return Err(MergeError::NoTree),
+            (Kind::Commit, data) => CommitRef::from_bytes(data)
+                .map_err(|_| MergeError::Corrupted(object_id, Kind::Commit))?
+                .tree(),
+            (Kind::Tag, data) => TagRef::from_bytes(data)
+                .map_err(|_| MergeError::Corrupted(object_id, Kind::Tag))?
+                .target(),
+        };
+    }
+}
+
+pub fn find_merge_base<M>(
+    tx: &Token<M>,
+    network: Network,
+    oid1: &oid,
+    oid2: &oid,
+) -> Option<ObjectId> {
+    // FIXME: it's possible for there to be 2 BCE in cross merge situations,
+    //        in which case recursive merge means creating a virtual branch
+    //        in which the BCEs are merged, then that is used as the common
+    //        ancestor
+
+    // create a set of all oid1 ancestors, then find the first
+    // (breadth-first) ancestor of oid2 that's in
+    let ancestors: HashSet<ObjectId> = log(tx, network, oid1)?.collect();
+
+    log(tx, network, oid2)?.find(|oid| ancestors.contains(oid))
+}
+
+#[derive(Debug)]
+pub enum MergeError {
+    NoCommonAncestor,
+    NotFound,
+    NoTree,
+    Conflict,
+    InvalidObjectType(Kind),
+    Corrupted(ObjectId, Kind),
+}
+impl std::fmt::Display for MergeError {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        match self {
+            Self::NoCommonAncestor => f.write_str("No common ancestor."),
+            Self::NotFound => f.write_str("Something was not found."),
+            Self::Conflict => f.write_str("Conflict"),
+            Self::NoTree => f.write_str("Never found a tree object"),
+            Self::InvalidObjectType(kind) => write!(
+                f,
+                "Invalid object type, expected {}, found {}",
+                Kind::Tree,
+                kind
+            ),
+            Self::Corrupted(oid, kind) => {
+                write!(f, "Found corrupted object {} ({})", oid.to_hex(), kind)
+            }
+        }
+    }
+}
+impl std::error::Error for MergeError {}
+
+fn path(c: &Change) -> &gix_object::bstr::BStr {
+    match c {
+        Change::Addition { path, .. }
+        | Change::Deletion { path, .. }
+        | Change::Modification { path, .. } => path.as_ref(),
+    }
+}

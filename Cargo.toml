@@ -1,0 +1,77 @@
+[package]
+name = "dummy_central"
+version = "0.1.0"
+authors = ["Xavier Morel <xmo@odoo.com>"]
+edition = "2024"
+
+[profile.release]
+overflow-checks = true
+#debug = true
+lto = "thin"
+
+[workspace]
+
+[dependencies]
+async-graphql = { version = "*", default-features = false }
+async-graphql-axum = "*"
+axum = { version = "*", features = ["macros"] }
+base64 = "*"
+bon = "*"
+bytes = "*"
+clap = { version = "*", features = ["derive"] }
+either = { version = "*", features = ["serde"] }
+flate2 = "*"
+futures = "*"
+gix-actor = "*"
+gix-date = "*"
+gix-diff = "*"
+gix-features = "*"
+gix-hash = "*"
+gix-object = "*"
+gix-pack = "*"
+gix-traverse = "*"
+github-types = { version = "*", path = "github-types" }
+headers = "*"
+hex = "*"
+hmac = "*"
+http = "*"
+itertools = "*"
+once_cell = "*"
+parking_lot = "*"
+percent-encoding = "*"
+r2d2 = "*"
+r2d2_sqlite = "*"
+regex = "*"
+reqwest = { version = "*", features = ["json", "multipart"] }
+rusqlite = "*"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+sha-1 = "*"
+sha2 = "*"
+smallvec = "*"
+tempfile = "*"
+tokio = { version = "*", features = ["full"] }
+tower = { version = "*", features = ["make"] }
+tower-http = { version = "*", features = ["trace", "catch-panic", "set-header", "timeout"] }
+tracing = "*"
+tracing-futures = "*"
+tracing-subscriber = "*"
+uuid = { version = "*", features = ["v4"] }
+
+opentelemetry = { version = "*", optional = true }
+axum-tracing-opentelemetry = { version = "*", optional = true }
+init-tracing-opentelemetry = { version = "*", optional = true, features = ["otlp", "tracing_subscriber_ext"] }
+tracing-opentelemetry = {version = "*", optional = true }
+opentelemetry-http = { version = "*", optional = true }
+globset = "*"
+
+[features]
+otlp = [
+    "dep:opentelemetry",
+    "dep:init-tracing-opentelemetry",
+    "dep:axum-tracing-opentelemetry",
+    "dep:tracing-opentelemetry",
+    "dep:opentelemetry-http",
+    "async-graphql/opentelemetry",
+]
+

@@ -1,0 +1,31 @@
+{
+    "org": {
+        "type": "Organization",
+        "role": "owner",
+        "token": []
+    },
+    "main": {
+        "type": "User",
+        "email": "foo@example.org",
+        "role": "user",
+        "token": ["token1"]
+    },
+    "user1": {
+        "type": "User",
+        "email": "user1@example.org",
+        "role": "reviewer",
+    "token": ["token2"]
+    },
+    "user2": {
+        "type": "User",
+        "email": "user2@example.org",
+        "role": "self_reviewer",
+        "token": ["token3"]
+    },
+    "user3": {
+        "type": "User",
+        "email": "user3@example.org",
+        "role": "other",
+        "token": ["token4"]
+    }
+}
