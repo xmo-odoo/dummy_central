@@ -1,0 +1,56 @@
+[package]
+name = "dummy_central"
+version = "0.1.0"
+authors = ["Xavier Morel <xmo@odoo.com>"]
+edition = "2021"
+
+[profile.dev]
+
+[profile.release]
+overflow-checks = true
+#debug = true
+lto = "thin"
+
+[workspace]
+
+[dependencies]
+base64 = "*"
+bytes = "*"
+flate2 = "*"
+futures = "*"
+git-actor = "*"
+git-diff = "*"
+git-features = "*"
+git-hash = "*"
+git-object = "*"
+git-pack = "*"
+git-traverse = "*"
+github-types = { version = "*", path = "github-types" }
+guard = "*"
+headers = "*"
+hex = "*"
+hmac = "*"
+hyper = "*"
+libsqlite3-sys = "*"
+once_cell = "*"
+parking_lot = "*"
+percent-encoding = "*"
+r2d2 = "*"
+r2d2_sqlite = "*"
+regex = "*"
+reqwest = { version = "*", features = ["json", "multipart"] }
+rusqlite = "*"
+serde = { version = "*", features = ["derive"] }
+serde_json = "*"
+sha-1 = "*"
+sha2 = "*"
+smallvec = "*"
+structopt = "*"
+tempfile = "3.3.0"
+tokio = { version = "*", features = ["full"] }
+tower = { version = "*", features = ["make", "timeout"] }
+tower-http = { version = "*", features = ["trace", "catch-panic", "set-header"] }
+tracing = "*"
+tracing-futures = "*"
+tracing-subscriber = "*"
+warp = "*"

@@ -1,0 +1,7 @@
+/.idea
+/users.json
+**/*.pack
+/target
+/Cargo.lock
+/.python-version
+pytest.ini
