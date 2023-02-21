@@ -1,3 +1,7 @@
+use axum::extract::{Json, Path, State};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{delete, get, post};
+use axum::Router;
 use git_hash::ObjectId;
 use guard::guard;
 use hex::ToHex;
@@ -8,14 +12,13 @@ use std::collections::hash_map::RandomState;
 use std::collections::{HashMap, HashSet};
 use std::convert::{TryFrom, TryInto};
 use std::sync::{Arc, RwLock, RwLockReadGuard};
-use warp::*;
 
 use github_types::repos::{CommitsResponse, HookEvent};
 use github_types::users::SimpleUser;
 use github_types::{issues::*, pulls::*, webhooks};
 
 use crate::github::repos::send_hook;
-use crate::github::{Authorization, Config, Error, St};
+use crate::github::{Authorization, Config, Error, GHError, St};
 use crate::model::repos::id_by_name;
 use crate::model::users::User;
 use crate::model::{prs, Source, Token};
@@ -102,7 +105,7 @@ impl Issue {
             //    head: Head {
             //        sha: r.4.encode_hex(),
             //       r#ref: String::new(),
-            //        owner: String::new(),
+            //        Path(owner): Path<String>::new(),
             //         repo: Arc::new
             //    }
             //})
@@ -161,34 +164,33 @@ impl ReviewComments {
 }
 
 #[rustfmt::skip]
-pub fn routes<T>(base: T) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
-where
-    T: Filter<Extract = (Authorization, St, String, String), Error = Rejection> + Clone + Send + Sync + 'static,
-{
-    base.clone().and(path!("pulls")).and(post()).and(body::json()).map(create_pull_request).boxed()
-        .or(base.clone().and(path!("issues")).and(post()).and(body::json()).map(create_issue).boxed())
-        .or(base.clone().and(path!("issues" / usize)).and(get()).map(get_issue).boxed())
-        .or(base.clone().and(path!("issues" / usize / "labels")).and(get()).map(get_issue_labels).boxed())
-        .or(base.clone().and(path!("issues" / usize / "labels")).and(put()).and(body::json()).map(replace_issue_labels).boxed())
-        .or(base.clone().and(path!("issues" / usize / "labels")).and(post()).and(body::json()).map(add_issue_labels).boxed())
-        .or(base.clone().and(path!("issues" / usize / "labels" / String)).and(delete()).map(delete_issue_label).boxed())
-        .or(base.clone().and(path!("issues" / usize / "comments")).and(get()).map(get_issue_comments).boxed())
-        .or(base.clone().and(path!("issues" / usize / "comments")).and(post()).and(body::json()).map(create_issue_comment).boxed())
-        .or(base.clone().and(path!("issues" / "comments" / i64)).and(get()).map(get_issue_comment).boxed())
-        .or(base.clone().and(path!("issues" / "comments" / i64)).and(patch()).and(body::json()).map(update_issue_comment).boxed())
-        .or(base.clone().and(path!("issues" / "comments" / i64)).and(delete()).map(delete_issue_comment).boxed())
-        .or(base.clone().and(path!("pulls" / usize)).and(get().or(head()).unify()).map(get_pull_request).boxed())
-        .or(base.clone().and(path!("pulls" / usize)).and(patch()).and(body::json()).map(update_pull_request).boxed())
-        .or(base.clone().and(path!("pulls" / usize / "commits")).and(get()).map(get_pull_request_commits).boxed())
-        .or(base.clone().and(path!("pulls" / usize / "reviews")).and(get()).map(list_reviews).boxed())
-        .or(base.clone().and(path!("pulls" / usize / "reviews")).and(post()).and(body::json()).map(create_review).boxed())
-        .or(base.clone().and(path!("pulls" / usize / "reviews" / i64 / "comments")).and(get()).map(list_review_comments).boxed())
-        .or(base.clone().and(path!("pulls" / usize / "comments")).and(get()).map(list_pr_comments).boxed())
-        .or(base.clone().and(path!("pulls" / usize / "comments")).and(post()).and(body::json()).map(create_review_comment).boxed())
-        .or(base.clone().and(path!("pulls" / "comments" / i64)).and(get()).map(get_review_comment).boxed())
-        .or(base.clone().and(path!("pulls" / "comments" / i64)).and(patch()).and(body::json()).map(update_review_comment).boxed())
-        .or(base.and(path!("pulls" / "comments" / i64)).and(delete()).map(delete_review_comment).boxed())
+pub fn routes() -> Router<St> {
+    Router::new()
+        .nest("/issues", issues_router())
+        .nest("/pulls", pr_router())
+}
 
+#[rustfmt::skip]
+fn issues_router() -> Router<St> {
+    Router::new()
+        .route("/", post(create_issue))
+        .route("/:number", get(get_issue))
+        .route("/:number/labels", get(get_issue_labels).put(replace_issue_labels).post(add_issue_labels))
+        .route("/:number/labels/:name", delete(delete_issue_label))
+        .route("/:number/comments", get(get_issue_comments).post(create_issue_comment))
+        .route("/comments/:id", get(get_issue_comment).patch(update_issue_comment).delete(delete_issue_comment))
+}
+
+#[rustfmt::skip]
+fn pr_router() -> Router<St> {
+    Router::new()
+        .route("/", post(create_pull_request))
+        .route("/:number", get(get_pull_request).patch(update_pull_request))
+        .route("/:number/commits", get(get_pull_request_commits))
+        .route("/:number/reviews", get(list_reviews).post(create_review))
+        .route("/:number/reviews/:id/comments", get(list_review_comments))
+        .route("/:number/comments", get(list_pr_comments).post(create_review_comment))
+        .route("/comments/:id", get(get_review_comment).patch(update_review_comment).delete(delete_review_comment))
 }
 
 pub fn pr_response(
@@ -272,38 +274,28 @@ pub fn pr_response(
     }
 }
 
-fn get_pull_request(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pull_number: usize,
-) -> impl Reply {
+async fn get_pull_request(
+    State(st): State<St>,
+    Path((owner, name, pull_number)): Path<(String, String, usize)>,
+) -> Result<Json<PullRequestResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(pr_id) = prs::find_id(tx, &owner, &name, pull_number) else {
-        return Error::NotFound.into_response("pulls", "get-a-pull-request");
+        return Err(Error::NotFound.into_response("pulls", "get-a-pull-request"));
     });
 
-    reply::with_status(
-        reply::json(&pr_response(tx, &st, pr_id)),
-        http::StatusCode::OK,
-    )
-    .into_response()
+    Ok(Json(pr_response(tx, &st, pr_id)))
 }
 
-fn get_pull_request_commits(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pull_number: usize,
-) -> impl Reply {
+async fn get_pull_request_commits(
+    State(st): State<St>,
+    Path((owner, name, pull_number)): Path<(String, String, usize)>,
+) -> Result<Json<Vec<CommitsResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
     guard!(let Some(pr) = prs::find_pr(tx, &owner, &name, pull_number) else {
-        return Error::NotFound.into_response("pulls", "list-commits-on-a-pull-request");
+        return Err(Error::NotFound.into_response("pulls", "list-commits-on-a-pull-request"));
     });
 
     // not entirely sure how traversal is supposed to work so... just
@@ -367,25 +359,23 @@ fn get_pull_request_commits(
     };
     pr_commits.reverse();
 
-    reply::with_status(reply::json(&pr_commits), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(pr_commits))
 }
 
-fn create_pull_request(
-    auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    req: PullRequestCreate,
-) -> impl Reply {
+async fn create_pull_request(
+    auth: Option<Authorization>,
+    State(st): State<St>,
+    Path((owner, name)): Path<(String, String)>,
+    Json(req): Json<PullRequestCreate>,
+) -> Result<(http::StatusCode, Json<PullRequestResponse>), Response> {
     let mut db = Source::get();
     let tx = db.token_eager();
 
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Error::NotFound.into_response("pulls", "create-a-pull-request");
+    guard!(let Some(user) = auth.and_then(|auth| crate::github::auth_to_user(&tx, auth)) else {
+        return Err(Error::NotFound.into_response("pulls", "create-a-pull-request").into_response());
     });
     guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("pulls", "create-a-pull-request");
+        return Err(Error::NotFound.into_response("pulls", "create-a-pull-request").into_response());
     });
 
     let base_ref = format!("refs/heads/{}", req.base);
@@ -406,11 +396,12 @@ fn create_pull_request(
                 _head_repo = fork;
                 (&_head_repo, branch)
             } else {
-                return Error::Unprocessable(
+                return Err(Error::Unprocessable(
                     "Validation Failed",
                     &[Error::details("PullRequest", "head", "invalid", "")],
                 )
-                .into_response("pulls", "create-a-pull-request");
+                .into_response("pulls", "create-a-pull-request")
+                .into_response());
             }
         } else {
             (&repo, req.head.as_str())
@@ -419,17 +410,25 @@ fn create_pull_request(
     let head = crate::model::git::refs::resolve(&tx, head_repo.id, &head_ref);
     let head_error = Error::details("PullRequest", "head", "invalid", "");
 
-    fn validation_failed(
-        es: &[crate::github::GithubErrorDetails<'_>],
-    ) -> reply::Response {
+    fn validation_failed<'a>(
+        es: &'a [crate::github::GithubErrorDetails<'_>],
+    ) -> GHError<'a> {
         Error::Unprocessable("Validation Failed", es)
             .into_response("pulls", "create-a-pull-request")
     }
 
     let (base, head) = match (base, head) {
-        (None, None) => return validation_failed(&[base_error, head_error]),
-        (None, Some(_)) => return validation_failed(&[base_error]),
-        (Some(_), None) => return validation_failed(&[head_error]),
+        (None, None) => {
+            return Err(
+                validation_failed(&[base_error, head_error]).into_response()
+            )
+        }
+        (None, Some(_)) => {
+            return Err(validation_failed(&[base_error]).into_response())
+        }
+        (Some(_), None) => {
+            return Err(validation_failed(&[head_error]).into_response())
+        }
         (Some(a), Some(b)) => (a, b),
     };
 
@@ -456,8 +455,9 @@ fn create_pull_request(
                     let mut deets =
                         Error::details("PullRequest", "issue", "invalid", "");
                     deets.value = Some(issue);
-                    return Error::Unprocessable(err, &[deets])
-                        .into_response("pulls", "create-a-pull-request");
+                    return Err(Error::Unprocessable(err, &[deets])
+                        .into_response("pulls", "create-a-pull-request")
+                        .into_response());
                 }
             }
         }
@@ -496,42 +496,41 @@ fn create_pull_request(
     );
     let pr = pr_response(&tx, &st, pr_id);
     tx.commit();
-    reply::with_status(reply::json(&pr), http::StatusCode::CREATED)
-        .into_response()
+    Ok((http::StatusCode::CREATED, Json(pr)))
 }
 
-fn update_pull_request(
+async fn update_pull_request(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    number: usize,
-    update: PullRequestUpdate,
-) -> impl Reply {
+    State(st): State<St>,
+    Path((owner, name, number)): Path<(String, String, usize)>,
+    Json(update): Json<PullRequestUpdate>,
+) -> Result<Json<PullRequestResponse>, Response> {
     let mut db = Source::get();
     let tx = db.token_eager();
     let user = crate::github::auth_to_user(&tx, auth).unwrap();
     guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("pulls", "update-a-pull-request");
+        return Err(Error::NotFound.into_response("pulls", "update-a-pull-request").into_response());
     });
 
     guard!(let Some(pr) = find_pr(&tx, &owner, &name, number) else {
-        return Error::NotFound.into_response("pulls", "update-a-pull-request");
+        return Err(Error::NotFound.into_response("pulls", "update-a-pull-request").into_response());
     });
 
     // PR creator can edit pr, repo writers can edit PR as well
     if !prs::can_write(&tx, user.id, pr.id) {
-        return Error::Forbidden("No write acces to the PR")
-            .into_response("pulls", "update-a-pull-request");
+        return Err(Error::Forbidden("No write acces to the PR")
+            .into_response("pulls", "update-a-pull-request")
+            .into_response());
     }
 
     let title = if let Some(t) = update.title {
         if t.is_empty() {
-            return Error::Unprocessable(
+            return Err(Error::Unprocessable(
                 "Validation Failed",
                 &[Error::details("PullRequest", "title", "missing_field", "")],
             )
-            .into_response("pulls", "update-a-pull-request");
+            .into_response("pulls", "update-a-pull-request")
+            .into_response());
         }
         Some(t)
     } else {
@@ -559,9 +558,7 @@ fn update_pull_request(
         && state.is_none()
         && update.base.is_none()
     {
-        let pr = pr_response(&tx, &st, pr.id);
-        return reply::with_status(reply::json(&pr), http::StatusCode::OK)
-            .into_response();
+        return Ok(Json(pr_response(&tx, &st, pr.id)));
     }
 
     // TODO: test actual message
@@ -569,7 +566,7 @@ fn update_pull_request(
     // TODO: test case, apparently closing & rebasing a PR in the same call
     //       performs the closing first, which fails the base change
     if update.base.is_some() && matches!(pr.issue.state, prs::State::Closed) {
-        return Error::Unprocessable(
+        return Err(Error::Unprocessable(
             "Validation Failed",
             &[Error::details(
                 "PullRequest",
@@ -578,14 +575,19 @@ fn update_pull_request(
                 "Cannot change the base branch of a closed pull request.",
             )],
         )
-        .into_response("pulls", "update-a-pull-request");
+        .into_response("pulls", "update-a-pull-request")
+        .into_response());
     }
 
     // TODO: test actual message
     // TODO: test edge behaviours of updating closed PRs e.g. when hooks occur exactly
     if state == Some(prs::State::Open) && pr.dead {
-        return Error::Unprocessable("can not reopen a force-pushed PR", &[])
-            .into_response("pulls", "update-a-pull-request");
+        return Err(Error::Unprocessable(
+            "can not reopen a force-pushed PR",
+            &[],
+        )
+        .into_response("pulls", "update-a-pull-request")
+        .into_response());
     }
 
     prs::update(
@@ -607,7 +609,7 @@ fn update_pull_request(
         {
             prs::set_base(&tx, pr.id, base);
         } else {
-            return Error::Unprocessable(
+            return Err(Error::Unprocessable(
                 "Validation Failed",
                 &[Error::details(
                     "PullRequest",
@@ -616,7 +618,8 @@ fn update_pull_request(
                     &format!("Proposed base branch '{base}' was not found"),
                 )],
             )
-            .into_response("pulls", "update-a-pull-request");
+            .into_response("pulls", "update-a-pull-request")
+            .into_response());
         }
     }
 
@@ -688,28 +691,26 @@ fn update_pull_request(
     }
     let pr = pr_response(&tx, &st, pr.id);
     tx.commit();
-    reply::with_status(reply::json(&pr), http::StatusCode::OK).into_response()
+    Ok(Json(pr))
 }
 
-fn create_review(
+async fn create_review(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pr: usize,
-    req: CreateReviewRequest,
-) -> impl Reply {
+    State(st): State<St>,
+    Path((owner, name, pr)): Path<(String, String, usize)>,
+    Json(req): Json<CreateReviewRequest>,
+) -> Result<(http::StatusCode, Json<ReviewResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request");
+        return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
     });
     guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request");
+        return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
     });
     guard!(let Some(pr) = prs::find_id(&tx, &owner, &name, pr) else {
-        return Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request");
+        return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
     });
 
     let commit_id = if let Some(cid) = req.commit_id {
@@ -774,22 +775,18 @@ fn create_review(
         },
     );
 
-    reply::with_status(reply::json(&review), http::StatusCode::CREATED)
-        .into_response()
+    Ok((http::StatusCode::CREATED, Json(review)))
 }
 
-fn list_reviews(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pr: usize,
-) -> impl Reply {
+async fn list_reviews(
+    State(st): State<St>,
+    Path((owner, name, pr)): Path<(String, String, usize)>,
+) -> Result<Json<Vec<ReviewResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(pr) = prs::find_id(tx, &owner, &name, pr) else {
-        return Error::NotFound.into_response("reviews", "list-reviews-for-a-pull-request");
+        return Err(Error::NotFound.into_response("reviews", "list-reviews-for-a-pull-request"));
     });
 
     // TODO: pagination
@@ -816,8 +813,7 @@ fn list_reviews(
             submitted_at: r.submitted_at,
         }
     });
-    reply::with_status(reply::json(&reviews), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(reviews))
 }
 
 fn comment_to_response(
@@ -841,28 +837,25 @@ fn comment_to_response(
         updated_at: c.updated_at,
     }
 }
-fn list_review_comments(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pr_number: usize,
-    review_id: i64,
-) -> impl Reply {
+
+async fn list_review_comments(
+    State(st): State<St>,
+    Path((owner, name, pr_number, review_id)): Path<(String, String, usize, i64)>,
+) -> Result<Json<Vec<ReviewCommentResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "reviews",
             "list-comments-for-a-pull-request-review",
-        );
+        ));
     });
     guard!(let Some(review) = reviews::get_by_i64(tx, review_id) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "reviews",
             "list-comments-for-a-pull-request-review",
-        );
+        ));
     });
     // TODO: what if the review is not on the PR?
     assert_eq!(pr_id, review.pull_request);
@@ -871,51 +864,43 @@ fn list_review_comments(
         comment_to_response(&st.root, &owner, &name, c)
     });
 
-    reply::with_status(reply::json(&comments), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(comments))
 }
 
-fn list_pr_comments(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pr_number: usize,
-) -> impl Reply {
+async fn list_pr_comments(
+    State(st): State<St>,
+    Path((owner, name, pr_number)): Path<(String, String, usize)>,
+) -> Result<Json<Vec<ReviewCommentResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "reviews",
             "list-review-comments-on-a-pull-request",
-        );
+        ));
     });
 
     let comments = reviews::list_pr_comments(tx, pr_id, |c| {
         comment_to_response(&st.root, &owner, &name, c)
     });
 
-    reply::with_status(reply::json(&comments), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(comments))
 }
 
-fn create_review_comment(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    pr_number: usize,
-    req: CreateReviewCommentRequest,
-) -> impl Reply {
+async fn create_review_comment(
+    State(st): State<St>,
+    Path((owner, name, pr_number)): Path<(String, String, usize)>,
+    Json(req): Json<CreateReviewCommentRequest>,
+) -> Result<(http::StatusCode, Json<ReviewCommentResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(pr_id) = prs::find_id(&tx, &owner, &name, pr_number) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "update-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
 
     let comments =
@@ -925,68 +910,57 @@ fn create_review_comment(
 
     tx.commit();
 
-    reply::with_status(
-        reply::json(&comment_to_response(&st.root, &owner, &name, comment)),
+    Ok((
         http::StatusCode::CREATED,
-    )
-    .into_response()
+        Json(comment_to_response(&st.root, &owner, &name, comment)),
+    ))
 }
 
 // TODO: what happens for review comments of reviews?
-fn get_review_comment(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    comment_id: i64,
-) -> impl Reply {
+async fn get_review_comment(
+    State(st): State<St>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+) -> Result<Json<ReviewCommentResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(repo_id) = id_by_name(tx, &owner, &name) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "get-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
 
     guard!(let Some(comment) = reviews::comment_by_i64(tx, repo_id, comment_id)
             .map(|cid| reviews::get_comment(tx, cid)) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "get-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
 
-    reply::with_status(
-        reply::json(&comment_to_response(&st.root, &owner, &name, comment)),
-        http::StatusCode::OK,
-    )
-    .into_response()
+    Ok(Json(comment_to_response(&st.root, &owner, &name, comment)))
 }
 
-fn update_review_comment(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    comment_id: i64,
-    req: UpdateReviewCommentRequest,
-) -> impl Reply {
+async fn update_review_comment(
+    State(st): State<St>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+    Json(req): Json<UpdateReviewCommentRequest>,
+) -> Result<Json<ReviewCommentResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "create-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
     guard!(let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "create-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
 
     reviews::update_comment(&tx, comment_id, &req.body);
@@ -995,59 +969,49 @@ fn update_review_comment(
 
     tx.commit();
 
-    reply::with_status(
-        reply::json(&comment_to_response(&st.root, &owner, &name, comment)),
-        http::StatusCode::OK,
-    )
-    .into_response()
+    Ok(Json(comment_to_response(&st.root, &owner, &name, comment)))
 }
 
-fn delete_review_comment(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    comment_id: i64,
-) -> impl Reply {
+async fn delete_review_comment(
+    State(st): State<St>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+) -> Result<http::StatusCode, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
     guard!(let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id) else {
-        return Error::NotFound.into_response(
+        return Err(Error::NotFound.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
-        );
+        ));
     });
 
     if reviews::delete_comment(&tx, comment_id) {
         tx.commit();
-        http::StatusCode::NO_CONTENT.into_response()
+        Ok(http::StatusCode::NO_CONTENT)
     } else {
-        Error::NotFound.into_response(
+        Err(Error::NotFound.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
-        )
+        ))
     }
 }
 
-fn get_issue(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    number: usize,
-) -> impl Reply {
+async fn get_issue(
+    State(st): State<St>,
+    Path((owner, name, number)): Path<(String, String, usize)>,
+) -> Result<Json<IssueResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, number) else {
-        return Error::NotFound.into_response("issues", "get-an-issue");
+        return Err(Error::NotFound.into_response("issues", "get-an-issue"));
     });
 
     let issue = prs::get_issue(tx, issue_id);
@@ -1070,26 +1034,24 @@ fn get_issue(
             .map(|p| pr_response(tx, &st, p)),
     };
 
-    reply::with_status(reply::json(&response), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(response))
 }
 
-fn create_issue(
+async fn create_issue(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    req: IssueCreate,
-) -> impl Reply {
+    State(st): State<St>,
+    Path((owner, name)): Path<(String, String)>,
+    Json(req): Json<IssueCreate>,
+) -> Result<(http::StatusCode, Json<IssueResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Error::Unauthenticated("").into_response("issues", "create-an-issue");
+        return Err(Error::Unauthenticated("").into_response("issues", "create-an-issue"));
     });
 
     guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("issues", "create-an-issue");
+        return Err(Error::NotFound.into_response("issues", "create-an-issue"));
     });
 
     let issue_id = prs::issue_create(
@@ -1103,8 +1065,9 @@ fn create_issue(
     tx.commit();
 
     let tx = &db.token();
-    reply::with_status(
-        reply::json(&IssueResponse {
+    Ok((
+        http::StatusCode::CREATED,
+        Json(IssueResponse {
             id: *issue.id,
             node_id: String::new(),
             number: issue.number,
@@ -1120,9 +1083,7 @@ fn create_issue(
             comments: 0,
             pull_request: None,
         }),
-        http::StatusCode::CREATED,
-    )
-    .into_response()
+    ))
 }
 
 fn label_to_label(
@@ -1139,44 +1100,37 @@ fn label_to_label(
         color: label.color,
     }
 }
-fn get_issue_labels(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    issue_number: usize,
-) -> impl Reply {
+async fn get_issue_labels(
+    State(st): State<St>,
+    Path((owner, name, issue_number)): Path<(String, String, usize)>,
+) -> Result<Json<Vec<Label>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, issue_number) else {
-        return Error::NotFound.into_response("labels", "list-labels-for-an-issue");
+        return Err(Error::NotFound.into_response("labels", "list-labels-for-an-issue"));
     });
 
     let labels = prs::get_labels(tx, issue_id, |l| {
         label_to_label(&st.root, &owner, &name, l)
     });
-    reply::with_status(reply::json(&labels), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(labels))
 }
 
 #[derive(Deserialize)]
 struct Labels {
     labels: Vec<String>,
 }
-fn replace_issue_labels(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    issue_number: usize,
-    labels: Labels,
-) -> impl Reply {
+async fn replace_issue_labels(
+    State(st): State<St>,
+    Path((owner, name, issue_number)): Path<(String, String, usize)>,
+    Json(labels): Json<Labels>,
+) -> Result<Json<Vec<Label>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
-        return Error::NotFound.into_response("labels", "add-labels-to-an-issue");
+        return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
     });
 
     for label in prs::get_labels(&tx, issue, |l| l.id) {
@@ -1195,24 +1149,20 @@ fn replace_issue_labels(
     });
     tx.commit().unwrap();
 
-    reply::with_status(reply::json(&labels), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(labels))
 }
 
 // fixme: does this return just the new labels, or all the labels?
-fn add_issue_labels(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    issue_number: usize,
-    labels: Labels,
-) -> impl Reply {
+async fn add_issue_labels(
+    State(st): State<St>,
+    Path((owner, name, issue_number)): Path<(String, String, usize)>,
+    Json(labels): Json<Labels>,
+) -> Result<Json<Vec<Label>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
-        return Error::NotFound.into_response("labels", "add-labels-to-an-issue");
+        return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
     });
 
     for label in labels
@@ -1228,23 +1178,19 @@ fn add_issue_labels(
     });
     tx.commit().unwrap();
 
-    reply::with_status(reply::json(&labels), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(labels))
 }
 
-fn delete_issue_label(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    issue_number: usize,
-    label: String,
-) -> impl Reply {
+async fn delete_issue_label(
+    State(st): State<St>,
+    Path((owner, name, issue_number)): Path<(String, String, usize)>,
+    Path(label): Path<String>,
+) -> Result<Json<Vec<Label>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
-        return Error::NotFound.into_response("labels", "add-labels-to-an-issue");
+        return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
     });
 
     if let Some(existing) = prs::get_labels(&tx, issue, |l| l)
@@ -1259,22 +1205,18 @@ fn delete_issue_label(
     });
     tx.commit().unwrap();
 
-    reply::with_status(reply::json(&labels), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(labels))
 }
 
-fn get_issue_comments(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    issue_number: usize,
-) -> impl Reply {
+async fn get_issue_comments(
+    State(st): State<St>,
+    Path((owner, name, issue_number)): Path<(String, String, usize)>,
+) -> Result<Json<Vec<IssueCommentResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
-        return Error::NotFound.into_response("labels", "add-labels-to-an-issue");
+        return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
     });
 
     let comments = prs::get_comments(&tx, issue, |c| {
@@ -1292,30 +1234,27 @@ fn get_issue_comments(
         .into_response(&st.root, &owner, &name)
     });
 
-    reply::with_status(reply::json(&comments), http::StatusCode::OK)
-        .into_response()
+    Ok(Json(comments))
 }
 
-fn create_issue_comment(
+async fn create_issue_comment(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    issue_number: usize,
-    req: CommentCreate,
-) -> impl Reply {
+    State(st): State<St>,
+    Path((owner, name, issue_number)): Path<(String, String, usize)>,
+    Json(req): Json<CommentCreate>,
+) -> Result<(http::StatusCode, Json<IssueCommentResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
 
     guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Error::Unauthenticated("").into_response("issues", "create-an-issue-response");
+        return Err(Error::Unauthenticated("").into_response("issues", "create-an-issue-response"));
     });
     guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("issues", "create-an-issue-comments");
+        return Err(Error::NotFound.into_response("issues", "create-an-issue-comments"));
     });
     guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
                                     .map(|id| prs::get_issue(&tx, id)) else {
-        return Error::NotFound.into_response("issues", "create-an-issue-comments");
+        return Err(Error::NotFound.into_response("issues", "create-an-issue-comments"));
     });
 
     let comment_id = prs::create_comment(&tx, user.id, issue.id, &req.body);
@@ -1356,9 +1295,10 @@ fn create_issue_comment(
     tx.commit();
 
     // should have a comment id, but how can I know what it is?
-    reply::with_status(
-        reply::json(
-            &IssueComment {
+    Ok((
+        http::StatusCode::CREATED,
+        Json(
+            IssueComment {
                 id: *comment.id,
                 issue_number: issue.number,
                 body: comment.body,
@@ -1368,68 +1308,57 @@ fn create_issue_comment(
             }
             .into_response(&st.root, &owner, &name),
         ),
-        http::StatusCode::CREATED,
-    )
-    .into_response()
+    ))
 }
 
-fn get_issue_comment(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    comment_id: i64,
-) -> impl Reply {
+async fn get_issue_comment(
+    State(st): State<St>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+) -> Result<Json<IssueCommentResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     guard!(let Some(repo_id) = id_by_name(tx, &owner, &name) else {
-        return Error::NotFound.into_response("issues", "get-an-issue-comment");
+        return Err(Error::NotFound.into_response("issues", "get-an-issue-comment"));
     });
     guard!(let Some(comment) = prs::get_comment_by_i64(tx, repo_id, comment_id) else {
-        return Error::NotFound.into_response("issues", "get-an-issue-comment");
+        return Err(Error::NotFound.into_response("issues", "get-an-issue-comment"));
     });
     let issue = prs::get_issue(tx, comment.issue);
 
-    reply::with_status(
-        reply::json(
-            &IssueComment {
-                id: *comment.id,
-                issue_number: issue.number,
-                body: comment.body,
-                user: comment
-                    .author
-                    .map(|uid| crate::model::users::get_by_id(tx, uid))
-                    .map(Cow::Owned),
-                created_at: comment.created_at,
-                updated_at: comment.updated_at,
-            }
-            .into_response(&st.root, &owner, &name),
-        ),
-        http::StatusCode::OK,
-    )
-    .into_response()
+    Ok(Json(
+        IssueComment {
+            id: *comment.id,
+            issue_number: issue.number,
+            body: comment.body,
+            user: comment
+                .author
+                .map(|uid| crate::model::users::get_by_id(tx, uid))
+                .map(Cow::Owned),
+            created_at: comment.created_at,
+            updated_at: comment.updated_at,
+        }
+        .into_response(&st.root, &owner, &name),
+    ))
 }
 
-fn update_issue_comment(
+async fn update_issue_comment(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    comment_id: i64,
-    IssueUpdate { body }: IssueUpdate,
-) -> impl Reply {
+    State(st): State<St>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+    Json(IssueUpdate { body }): Json<IssueUpdate>,
+) -> Result<Json<IssueCommentResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Error::Unauthenticated("").into_response("issues", "update-an-issue-comment");
+        return Err(Error::Unauthenticated("").into_response("issues", "update-an-issue-comment"));
     });
     guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("issues", "update-an-issue-comment");
+        return Err(Error::NotFound.into_response("issues", "update-an-issue-comment"));
     });
     guard!(let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id) else {
-        return Error::NotFound.into_response("issues", "update-an-issue-comment");
+        return Err(Error::NotFound.into_response("issues", "update-an-issue-comment"));
     });
 
     let issue = prs::get_issue(&tx, comment.issue);
@@ -1477,31 +1406,25 @@ fn update_issue_comment(
     });
     tx.commit();
 
-    reply::with_status(
-        reply::json(&issue_comment.into_response(&st.root, &owner, &name)),
-        http::StatusCode::OK,
-    )
-    .into_response()
+    Ok(Json(issue_comment.into_response(&st.root, &owner, &name)))
 }
 
-fn delete_issue_comment(
+async fn delete_issue_comment(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    comment_id: i64,
-) -> impl Reply {
+    State(st): State<St>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+) -> Result<http::StatusCode, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
 
     guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Error::Unauthenticated("").into_response("issues", "delete-an-issue-comment");
+        return Err(Error::Unauthenticated("").into_response("issues", "delete-an-issue-comment"));
     });
     guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Error::NotFound.into_response("issues", "delete-an-issue-comment");
+        return Err(Error::NotFound.into_response("issues", "delete-an-issue-comment"));
     });
     guard!(let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id) else {
-        return Error::NotFound.into_response("issues", "delete-an-issue-comment");
+        return Err(Error::NotFound.into_response("issues", "delete-an-issue-comment"));
     });
 
     let issue = prs::get_issue(&tx, comment.issue);
@@ -1544,5 +1467,5 @@ fn delete_issue_comment(
         })
     });
     tx.commit();
-    http::StatusCode::NO_CONTENT.into_response()
+    Ok(http::StatusCode::NO_CONTENT)
 }

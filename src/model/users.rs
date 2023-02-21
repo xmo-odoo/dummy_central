@@ -17,7 +17,7 @@ pub fn load(
         tx.prepare("INSERT INTO users (login, name, type) VALUES (?, ?, ?)")?;
     let mut insert_email = tx.prepare(
         r#"
-            INSERT INTO emails (user, email, "primary", visibility) 
+            INSERT INTO emails (user, email, "primary", visibility)
             VALUES (?, ?, true, 'public')
         "#,
     )?;

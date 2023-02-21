@@ -417,12 +417,14 @@ pub fn get_collaborators(tx: &Token, repo: RepositoryId) -> Vec<String> {
 }
 
 pub fn add_collaborator(tx: &Token, repo: RepositoryId, login: String) -> bool {
-    // TODO: what is the default access level?
     1 == tx
         .execute(
             "
         INSERT INTO collaborators (repository, user, role)
-        VALUES (?, (SELECT id FROM users WHERE login = ?), 3)
+        SELECT ?, id, 3 FROM users WHERE login = ?
+        -- could DO NOTHING but then would need different way to return that the
+        -- user does not exist
+        ON CONFLICT DO UPDATE SET role = 3
     ",
             (*repo, &login),
         )

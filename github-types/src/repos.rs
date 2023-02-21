@@ -138,8 +138,10 @@ pub struct UpdateRepository {
 }
 #[derive(Deserialize)]
 pub struct CreateFork {
-    #[serde(default)]
     pub organization: Option<String>,
+    pub name: Option<String>,
+    #[serde(default)]
+    pub default_branch_only: bool,
 }
 
 #[derive(Serialize)]

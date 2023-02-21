@@ -14,7 +14,9 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 use structopt::*;
+use tower::MakeService;
 use tower::{make::Shared, ServiceBuilder};
+use tower_http::timeout::TimeoutLayer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
     set_header::response::SetResponseHeaderLayer,
@@ -22,11 +24,9 @@ use tower_http::{
     LatencyUnit,
 };
 use tracing::*;
-use warp::*;
 
 mod github;
 mod model;
-mod utils;
 
 #[derive(StructOpt)]
 struct Opt {
@@ -70,26 +70,26 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let url = format!("http://{addr}");
     let (conf, webhooks) = github::Config::new(url.clone())?;
-    let warp_handler = github::routes(Arc::new(conf));
-
-    let service = ServiceBuilder::new()
-        // Add high level tracing/logging to all requests
+    let handler = github::routes(conf)
         .layer(
-            TraceLayer::new_for_http()
-                .on_body_chunk(|chunk: &Bytes, latency: Duration, _: &tracing::Span| {
-                    tracing::trace!(size_bytes = chunk.len(), latency = ?latency, "sending body chunk")
-                })
-                .make_span_with(DefaultMakeSpan::new().include_headers(true))
-                .on_response(DefaultOnResponse::new().include_headers(true).latency_unit(LatencyUnit::Micros)),
-        )
-        .layer(SetResponseHeaderLayer::if_not_present(
-            HeaderName::from_static("x_oauth_scopes"),
-            HeaderValue::from_static("admin:repo_hook, delete_repo, public_repo, user:email")
-        ))
-        .layer(CatchPanicLayer::new())
-        // Set a timeout
-        .timeout(Duration::from_secs(10))
-        .service(warp::service(warp_handler));
+            ServiceBuilder::new()
+            // Add high level tracing/logging to all requests
+            .layer(
+                TraceLayer::new_for_http()
+                    .on_body_chunk(|chunk: &Bytes, latency: Duration, _: &tracing::Span| {
+                        tracing::trace!(size_bytes = chunk.len(), latency = ?latency, "sending body chunk")
+                    })
+                    .make_span_with(DefaultMakeSpan::new().include_headers(true))
+                    .on_response(DefaultOnResponse::new().include_headers(true).latency_unit(LatencyUnit::Micros)),
+            )
+            .layer(SetResponseHeaderLayer::if_not_present(
+                HeaderName::from_static("x_oauth_scopes"),
+                HeaderValue::from_static("admin:repo_hook, delete_repo, public_repo, user:email")
+            ))
+            .layer(CatchPanicLayer::new())
+            // Set a timeout
+            .layer(TimeoutLayer::new(Duration::from_secs(10)))
+        );
 
     info!("listening on {}", url);
     if let Some(portfile) = opt.portfile {
@@ -98,7 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         f.flush()?;
     }
     tokio::join![
-        Server::from_tcp(listener)?.serve(Shared::new(service)),
+        Server::from_tcp(listener)?.serve(Shared::new(handler)),
         webhooks
     ];
 

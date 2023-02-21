@@ -26,7 +26,9 @@ CREATE TABLE users (
     default_branch text not null default 'main'
 ) STRICT;
 
-INSERT INTO users (login, name, type) VALUES ('ghost', 'Deleted user', 'user');
+INSERT INTO users (login, name, type)
+VALUES ('ghost', 'Deleted user', 'user'),
+       ('web-flow', 'GitHub Web Flow', 'user');
 
 CREATE TABLE emails (
     email text not null primary key,
@@ -71,13 +73,28 @@ CREATE TABLE refs (
     unique(repository, name)
 ) STRICT;
 
--- not really researched how this works, so for now just use a join-ish table
+CREATE TABLE acl (
+    id integer primary key,
+    label varchar not null
+);
+INSERT INTO acl (id, label)
+VALUES (1, 'read'),
+       (2, 'triage'),
+       (3, 'write'),
+       (4, 'maintain'),
+       (5, 'admin');
+CREATE TRIGGER create_acl INSERT ON acl BEGIN SELECT raise(ABORT, 'list of ACLs is read-only'); END;
+CREATE TRIGGER update_acl UPDATE ON acl BEGIN SELECT raise(ABORT, 'list of ACLs is read-only'); END;
+CREATE TRIGGER delete_acl DELETE ON acl BEGIN SELECT raise(ABORT, 'list of ACLs is read-only'); END;
+
+-- should probably have a flag to indicate the invitation was accepted (q:
+-- does it need 3 values to store rejection info? could just delete if declined)
 CREATE TABLE collaborators (
     repository integer not null references repositories on delete cascade,
     user integer not null references users on delete cascade,
-    -- note: available roles depend on org status (?)
-    -- "read", "triage", "write", "maintain", "admin"
-    role integer not null check (role in (1, 2, 3, 4, 5)),
+    -- TODO: should this link to a join table with the repo in order to handle
+    --       variable list of permissible ACLs?
+    role integer not null references acl,
     unique(repository, user)
 ) STRICT;
 

@@ -1,10 +1,16 @@
 /*!
 # Straight pseudo-github implementation.
  */
+use axum::extract::{FromRequestParts, Path, State};
+use axum::http::request::Parts;
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, patch, post};
+use axum::{async_trait, Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use guard::guard;
 use hmac::{Hmac, Mac};
 use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
+use hyper::StatusCode;
 use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
 use serde_json::Deserializer;
@@ -19,7 +25,6 @@ use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tracing::*;
-use warp::*;
 
 use github_types::orgs::OrganizationFull;
 use github_types::repos::{
@@ -151,6 +156,71 @@ impl Config {
         }
     }
 }
+
+struct GHError<'a> {
+    error: Error<'a>,
+    category: &'a str,
+    section: &'a str,
+    item: &'a str,
+}
+impl IntoResponse for GHError<'_> {
+    fn into_response(self) -> Response {
+        let documentation_url;
+        let documentation_url = if self.section.is_empty() {
+            "https://docs.github.com/rest"
+        } else {
+            documentation_url = format!(
+                "https://docs.github.com/rest/{}/{}#{}",
+                self.category, self.section, self.item,
+            );
+            &documentation_url
+        };
+        match self.error {
+            Error::NotFound => (
+                StatusCode::NOT_FOUND,
+                Json(GithubError {
+                    message: "Not Found",
+                    documentation_url,
+                    errors: &[],
+                }),
+            ),
+            Error::NotFound2(message) => (
+                StatusCode::NOT_FOUND,
+                Json(GithubError {
+                    message,
+                    documentation_url,
+                    errors: &[],
+                }),
+            ),
+            Error::Unauthenticated(message) => (
+                StatusCode::UNAUTHORIZED,
+                Json(GithubError {
+                    message,
+                    documentation_url,
+                    errors: &[],
+                }),
+            ),
+            Error::Forbidden(message) => (
+                StatusCode::FORBIDDEN,
+                Json(GithubError {
+                    message,
+                    documentation_url,
+                    errors: &[],
+                }),
+            ),
+            Error::Unprocessable(message, errors) => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                Json(GithubError {
+                    message,
+                    documentation_url,
+                    errors,
+                }),
+            ),
+        }
+        .into_response()
+    }
+}
+
 enum Error<'a> {
     NotFound,
     NotFound2(&'a str),
@@ -158,11 +228,11 @@ enum Error<'a> {
     Forbidden(&'a str),
     Unprocessable(&'a str, &'a [GithubErrorDetails<'a>]),
 }
-impl Error<'_> {
-    fn repo(m: &'static str) -> GithubErrorDetails<'static> {
+impl<'e> Error<'e> {
+    const fn repo(m: &'static str) -> GithubErrorDetails<'static> {
         Self::details("Repository", "name", "custom", m)
     }
-    fn details<'a>(
+    const fn details<'a>(
         resource: &'a str,
         field: &'a str,
         code: &'a str,
@@ -182,67 +252,21 @@ impl Error<'_> {
     /// (e.g. `"issues"`, `"repos"`) and the name of the specific item
     /// (anchor) within that page, prepends with the rest of the URL
     /// up to and including `"reference/"`.
-    fn into_response(self, section: &str, item: &str) -> reply::Response {
+    fn into_response(self, section: &'e str, item: &'e str) -> GHError<'e> {
         self.into_response_full("reference", section, item)
     }
     fn into_response_full(
         self,
-        category: &str,
-        section: &str,
-        item: &str,
-    ) -> reply::Response {
-        let documentation_url;
-        let documentation_url = if section.is_empty() {
-            "https://docs.github.com/rest"
-        } else {
-            documentation_url = format!(
-                "https://docs.github.com/rest/{category}/{section}#{item}",
-            );
-            &documentation_url
-        };
-        match self {
-            Error::NotFound => reply::with_status(
-                reply::json(&GithubError {
-                    message: "Not Found",
-                    documentation_url,
-                    errors: &[],
-                }),
-                http::StatusCode::NOT_FOUND,
-            ),
-            Error::NotFound2(message) => reply::with_status(
-                reply::json(&GithubError {
-                    message,
-                    documentation_url,
-                    errors: &[],
-                }),
-                http::StatusCode::NOT_FOUND,
-            ),
-            Error::Unauthenticated(message) => reply::with_status(
-                reply::json(&GithubError {
-                    message,
-                    documentation_url,
-                    errors: &[],
-                }),
-                http::StatusCode::UNAUTHORIZED,
-            ),
-            Error::Forbidden(message) => reply::with_status(
-                reply::json(&GithubError {
-                    message,
-                    documentation_url,
-                    errors: &[],
-                }),
-                http::StatusCode::FORBIDDEN,
-            ),
-            Error::Unprocessable(message, errors) => reply::with_status(
-                reply::json(&GithubError {
-                    message,
-                    documentation_url,
-                    errors,
-                }),
-                http::StatusCode::UNPROCESSABLE_ENTITY,
-            ),
+        category: &'e str,
+        section: &'e str,
+        item: &'e str,
+    ) -> GHError<'e> {
+        GHError {
+            error: self,
+            category,
+            section,
+            item,
         }
-        .into_response()
     }
 }
 
@@ -312,21 +336,31 @@ impl Repository {
     }
 }
 type St = Arc<Config>;
-type Authorization = Option<(Option<String>, String)>;
 fn auth_to_user(tx: &Token, auth: Authorization) -> Option<User<'static>> {
-    auth.and_then(|(_, token)| find_current_user(tx, &token))
+    find_current_user(tx, &auth.1)
 }
 
-fn base(
-    st: St,
-) -> impl Filter<Extract = (Authorization, St), Error = Rejection> + Clone {
-    header::optional(AUTHORIZATION.as_str())
-        .map(|h: Option<String>| {
-            h.and_then(|mut h| {
+#[derive(Debug)]
+struct Authorization(Option<String>, String);
+#[async_trait]
+impl<S> FromRequestParts<S> for Authorization
+where
+    S: Send + Sync,
+{
+    type Rejection = GHError<'static>;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &S,
+    ) -> Result<Self, Self::Rejection> {
+        parts
+            .headers
+            .get(AUTHORIZATION)
+            .and_then(|mut h| {
+                let h = h.to_str().ok()?;
                 // auth-scheme SP data
                 if h.starts_with("token ") {
-                    h.replace_range(..6, "");
-                    Some((None, h))
+                    Some((None, h[6..].to_string()))
                 } else if let Some(h) = h
                     .strip_prefix("basic ")
                     .or_else(|| h.strip_prefix("Basic "))
@@ -341,134 +375,161 @@ fn base(
                     None
                 }
             })
-        })
-        .and(any().map(move || Arc::clone(&st)))
-}
-pub fn routes(
-    st: St,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone {
-    let base = base(st);
-
-    base.clone()
-        .and(path!("user"))
-        .and(get())
-        .map(get_current_user)
-        .boxed()
-        .or(base
-            .clone()
-            .and(path!("user" / "emails"))
-            .and(get())
-            .map(get_current_user_emails)
-            .boxed())
-        .or(base
-            .clone()
-            .and(path!("user" / "repository_invitations" / usize))
-            .and(patch())
-            .map(accept_invitation)
-            .boxed())
-        .or(base
-            .clone()
-            .and(path!("users" / String))
-            .and(get())
-            .map(get_user)
-            .boxed())
-        .or(base
-            .clone()
-            .and(path!("orgs" / String))
-            .and(get())
-            .map(|_auth, st: St, orgname: String| {
-                use crate::model::users::*;
-                let _span = span!(Level::INFO, "get-org").entered();
-                let mut db = Source::get();
-                let tx = &db.token();
-                if let Some(u) = get_user(tx, &orgname) {
-                    info!("{} found => {:?}", orgname, u);
-                    if matches!(u.r#type, Type::Organization) {
-                        return reply::with_status(
-                            reply::json(&OrganizationFull {
-                                id: 0,
-                                node_id: String::new(),
-                                url: format!("{}/orgs/{}", st.root, u.login),
-                                r#type: match u.r#type {
-                                    Type::User => UserType::User,
-                                    Type::Organization => {
-                                        UserType::Organization
-                                    }
-                                },
-                                login: u.login.into_owned(),
-                                name: u.name.map(Cow::into_owned),
-                                is_verified: false,
-                                followers: 0,
-                                following: 0,
-                                public_gists: 0,
-                                public_repos: 0,
-                                has_organization_projects: false,
-                                has_repository_projects: false,
-                            }),
-                            http::StatusCode::OK,
-                        )
-                        .into_response();
-                    }
-                }
-                info!("{} not found", orgname);
-                Error::NotFound.into_response("orgs", "get-an-organization")
-            })
-            .boxed())
-        .or(base
-            .clone()
-            .and(
-                path!("user" / "repos")
-                    .map(String::new)
-                    .or(path!("orgs" / String / "repos"))
-                    .unify(),
+            .map(|(a, b)| Authorization(a, b))
+            .ok_or_else(|| Error::Unauthenticated("You must be logged in to do that.")
+                .into_response_full("guides", "getting-started-with-the-rest-api", "authentication")
             )
-            .and(post())
-            .and(body::json())
-            .map(create_repository)
-            .boxed())
-        .or(base
-            .clone()
-            .and(path!("rate_limit"))
-            .and(get())
-            .map(rate_limit)
-            .boxed())
-        .or(base
-            .clone()
-            .and(path!("graphql"))
-            .and(post())
-            .and(body::json())
-            .map(graphql)
-            .boxed())
-        .or(repos::routes(base))
-        .recover(|e: Rejection| async {
-            if e.is_not_found() {
-                Ok(Error::NotFound.into_response("", ""))
-            } else {
-                Err(e)
-            }
+    }
+}
+
+#[rustfmt::skip]
+pub fn routes(st: Config) -> Router {
+    Router::new()
+        .route("/user", get(get_current_user))
+        .route("/user/emails", get(get_current_user_emails))
+        .route("/user/repository_invitations/:id", patch(accept_invitation))
+        .route("/users/:name", get(get_user))
+        .route("/orgs/:name", get(get_org))
+        .route("/user/repos", post(create_repository))
+        .route("/orgs/:name/repos", post(create_repository))
+        .route("/rate_limit", get(rate_limit))
+        .route("/graphql", post(graphql))
+        .merge(repos::routes())
+        .fallback(|| async { Error::NotFound.into_response("", "") })
+        .with_state(Arc::new(st))
+}
+
+async fn get_current_user(
+    auth: Authorization,
+) -> Result<
+    ([(&'static str, &'static str); 1], Json<PublicUser>),
+    GHError<'static>,
+> {
+    let mut db = Source::get();
+    let tx = &db.token();
+    auth_to_user(tx, auth)
+        .ok_or_else(|| {
+            Error::Unauthenticated("Requires authentication")
+                .into_response("users", "get-the-authenticated-user")
+        })
+        .map(|u| {
+            (
+                [("X-OAuth-Scopes", "user:email")],
+                Json(PublicUser::from(u)),
+            )
         })
 }
 
-fn create_repository(
+async fn get_current_user_emails(
     auth: Authorization,
-    st: St,
-    owner: String,
-    request: CreateRepositoryRequest,
-) -> impl Reply {
+) -> Result<Json<Vec<Email>>, GHError<'static>> {
+    let mut db = Source::get();
+    let tx = &db.token();
+    auth_to_user(tx, auth)
+        .ok_or_else(|| {
+            Error::Unauthenticated("Requires authentication")
+                .into_response("users", "get-the-authenticated-user")
+        })
+        .map(|u| {
+            Json(
+                list_user_emails(tx, &u.id)
+                    .into_iter()
+                    .map(Email::from)
+                    .collect(),
+            )
+        })
+}
+
+/// Accepts a repository invitation (based on a global id), see
+/// [`add_collaborator`](repos/fn.add_collaborator.html) for details
+///
+/// Returns:
+/// - 204 (no content) if accepted
+/// - 304 (not modified) ???
+/// - 403 (forbidden) ???
+/// - 404 (not found) ???
+/// - 409 (conflict) ???
+async fn accept_invitation(Path(_invitation_id): Path<usize>) -> StatusCode {
+    StatusCode::NO_CONTENT
+}
+
+async fn get_user(
+    Path(username): Path<String>,
+) -> Result<Json<PublicUser>, GHError<'static>> {
+    let mut db = Source::get();
+    let tok = &db.token();
+    crate::model::users::get_user(tok, &username)
+        .ok_or_else(|| Error::NotFound.into_response("users", "get-a-user"))
+        .map(
+            // NOTE: works fine for API, but not web
+            |u| Json(PublicUser::from(u)),
+        )
+}
+
+async fn get_org(
+    State(st): State<St>,
+    Path(orgname): Path<String>,
+) -> Result<Json<OrganizationFull>, GHError<'static>> {
+    use crate::model::users::*;
+    let _span = span!(Level::INFO, "get-org").entered();
+    let mut db = Source::get();
+    let tx = &db.token();
+    get_user(tx, &orgname)
+        .filter(|u| matches!(u.r#type, Type::Organization))
+        .ok_or_else(|| {
+            info!("{orgname} not found");
+            Error::NotFound.into_response("orgs", "get-an-organization")
+        })
+        .map(|u| {
+            info!("{orgname} found => {u:?}");
+            Json(OrganizationFull {
+                id: 0,
+                node_id: String::new(),
+                url: format!("{}/orgs/{}", st.root, u.login),
+                r#type: match u.r#type {
+                    Type::User => UserType::User,
+                    Type::Organization => UserType::Organization,
+                },
+                login: u.login.into_owned(),
+                name: u.name.map(Cow::into_owned),
+                is_verified: false,
+                followers: 0,
+                following: 0,
+                public_gists: 0,
+                public_repos: 0,
+                has_organization_projects: false,
+                has_repository_projects: false,
+            })
+        })
+}
+
+const NAME_TOO_LONG: Error = Error::Unprocessable(
+    "Repository creation failed.",
+    &[Error::repo("name is too long (maximum is 100 characters)")],
+);
+const REPO_CREATION_FAILED: Error = Error::Unprocessable(
+    "Repository creation failed.",
+    &[Error::repo("name already exists on this account")],
+);
+async fn create_repository(
+    auth: Option<Authorization>,
+    State(st): State<St>,
+    owner: Option<Path<String>>,
+    Json(request): Json<CreateRepositoryRequest>,
+) -> Result<Response, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
     let _span = span!(Level::INFO, "create-a-repository").entered();
+    let owner = owner.as_deref().map_or("", |o| &**o);
     let endpoint = if owner.is_empty() {
         "create-a-repository-for-the-authenticated-user"
     } else {
         "create-an-organization-repository"
     };
-    let u = if let Some(u) = auth_to_user(&tx, auth) {
-        u
-    } else {
-        return Error::Unauthenticated("Requires authentication")
-            .into_response("repos", endpoint);
-    };
+    guard!(let Some(u) = auth.and_then(|a| auth_to_user(&tx, a)) else {
+        return Err(Error::Unauthenticated("Requires authentication")
+            .into_response("repos", endpoint));
+    });
 
     // Repository name can only contain ASCII letters,
     // numbers, `-`, `_`, and `.`, get auto-fixed at creation.
@@ -480,49 +541,32 @@ fn create_repository(
     // apparently length check is after replacement (at least
     // conceptually)
     if name.len() > 100 {
-        return Error::Unprocessable(
-            "Repository creation failed.",
-            &[Error::repo("name is too long (maximum is 100 characters)")],
-        )
-        .into_response("repos", endpoint);
+        return Err(NAME_TOO_LONG.into_response("repos", endpoint));
     }
 
     guard!(let Some(owner) =
         owner.is_empty().then(|| u.clone())
-            .or_else(|| crate::model::users::get_user(&tx, &owner)) else {
-        return Error::NotFound.into_response("repos", endpoint);
+            .or_else(|| crate::model::users::get_user(&tx, owner)) else {
+        return Err(Error::NotFound.into_response("repos", endpoint));
     });
 
     guard!(let Some(repo) = crate::model::repos::create_repository(&tx, u.id, owner.id, &name, None) else {
-        return Error::Unprocessable(
-            "Repository creation failed.",
-            &[Error::repo("name already exists on this account")],
-        )
-        .into_response("repos", endpoint);
+        return Err(REPO_CREATION_FAILED.into_response("repos", endpoint));
     });
 
-    let reply = reply::json(&repo.to_response(&tx, &st.root));
     info!("Created repository {}/{}", owner.login, name);
+    let r = Json(repo.to_response(&tx, &st.root)).into_response();
     tx.commit().unwrap();
-    reply::with_status(reply, http::StatusCode::OK).into_response()
+    Ok(r)
 }
 
-fn get_current_user(auth: Authorization, st: St) -> impl Reply {
-    let mut db = Source::get();
-    let tx = &db.token();
-    auth_to_user(tx, auth).map_or_else(
-        || {
-            Error::Unauthenticated("Requires authentication")
-                .into_response("users", "get-the-authenticated-user")
-        },
-        |u| {
-            reply::with_header(
-                reply::json(&PublicUser::from(u)),
-                "X-OAuth-Scopes",
-                "user:email",
-            )
-            .into_response()
-        },
+async fn rate_limit() -> ([(&'static str, &'static str); 1], Json<RateLimit>) {
+    (
+        [(
+            "X-OAuth-Scopes",
+            "admin:repo_hook, delete_repo, public_repo, user:email",
+        )],
+        Json(RateLimit::default()),
     )
 }
 
@@ -556,60 +600,6 @@ impl From<ModelVisibility> for APIVisibility {
         }
     }
 }
-fn get_current_user_emails(auth: Authorization, st: St) -> impl Reply {
-    let mut db = Source::get();
-    let tx = &db.token();
-    auth_to_user(tx, auth).map_or_else(
-        || {
-            Error::Unauthenticated("Requires authentication")
-                .into_response("users", "get-the-authenticated-user")
-        },
-        |u| {
-            reply::json(
-                &list_user_emails(tx, &u.id)
-                    .into_iter()
-                    .map(Email::from)
-                    .collect::<Vec<_>>(),
-            )
-            .into_response()
-        },
-    )
-}
-
-fn get_user(_: Authorization, st: St, username: String) -> impl Reply {
-    // dumb magical user, alternative would be to always create it in the DB I
-    // guess but if it's going to be hardcoded into the system...
-    if username == "web-flow" {
-        return reply::json(&PublicUser {
-            login: "web-flow".into(),
-            name: Some("GitHub Web Flow".into()),
-            ..PublicUser::default()
-        })
-        .into_response();
-    }
-    let mut db = Source::get();
-    let tok = &db.token();
-    if let Some(u) = crate::model::users::get_user(tok, &username) {
-        // NOTE: works fine for API, but not web
-        reply::json(&PublicUser::from(u)).into_response()
-    } else {
-        Error::NotFound.into_response("users", "get-a-user")
-    }
-}
-fn accept_invitation(_: Authorization, _: St, _: usize) -> impl Reply {
-    http::StatusCode::NO_CONTENT
-}
-
-fn rate_limit(_: Authorization, _: St) -> impl Reply {
-    reply::with_header(
-        reply::with_status(
-            reply::json(&RateLimit::default()),
-            http::StatusCode::OK,
-        ),
-        "X-OAuth-Scopes",
-        "admin:repo_hook, delete_repo, public_repo, user:email",
-    )
-}
 
 #[derive(Deserialize)]
 struct GraphqlRequest {
@@ -627,11 +617,7 @@ struct GraphqlResponse {
 struct GraphqlError {
     message: Cow<'static, str>,
 }
-impl reply::Reply for GraphqlResponse {
-    fn into_response(self) -> reply::Response {
-        reply::json(&self).into_response()
-    }
-}
+
 /**
 # NODE IDS
 
@@ -674,20 +660,20 @@ the following items:
 note: for a repo there's apparently only the db id of the repo (no way!) but it
       seems to work correctly for a PR
 */
-fn graphql(
+async fn graphql(
     auth: Authorization,
-    st: St,
-    request: GraphqlRequest,
-) -> GraphqlResponse {
+    State(st): State<St>,
+    Json(request): Json<GraphqlRequest>,
+) -> Json<GraphqlResponse> {
     let mut db = Source::get();
     let tx = db.token_eager();
     guard!(let Some(user) = auth_to_user(&tx, auth) else {
-        return GraphqlResponse {
+        return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message: "Unknown user".into()
             }]
-        };
+        });
     });
     // assume the query is either markPullRequestReadyForReview or
     // convertPullRequestToDraft and in both case the pullRequestId is provided
@@ -702,14 +688,14 @@ fn graphql(
     } else if request.query.contains("convertPullRequestToDraft(") {
         true
     } else {
-        return GraphqlResponse {
+        return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message:
                     "Invalid query, only updating draft status is kinda handled"
                         .into(),
             }],
-        };
+        });
     };
 
     let pid: Pid =
@@ -717,21 +703,21 @@ fn graphql(
             .unwrap();
 
     guard!(let Some(pr) = crate::model::prs::find_by_id(&tx, pid.0) else {
-        return GraphqlResponse {
+        return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message: "PR not found".into(),
             }]
-        }
+        });
     });
 
     if !crate::model::prs::can_write(&tx, user.id, pr.id) {
-        return GraphqlResponse {
+        return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message: "No write access".into(),
             }],
-        };
+        });
     }
 
     if crate::model::prs::set_draft(&tx, pr.id, new_draft) {
@@ -755,17 +741,17 @@ fn graphql(
         );
         tx.commit().unwrap();
 
-        GraphqlResponse {
+        Json(GraphqlResponse {
             data: Some(()),
             errors: vec![],
-        }
+        })
     } else {
-        GraphqlResponse {
+        Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message: "something bad happened".into(),
             }],
-        }
+        })
     }
 }
 

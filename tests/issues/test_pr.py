@@ -373,9 +373,7 @@ def test_synchronize(repo, config, endpoint, request):
     pr = repo.create_pull("test", "", base=repo.default_branch, head="pr")
     payload = pr_payload(get_hook())
     assert payload['action'] == 'opened'
-    print("before")
     update = set_file(repo, pr_branch, message='an other', name='foo', content='blorp again')
-    print("after")
     payload = pr_payload(get_hook())
     assert payload['action'] == 'synchronize'
     assert payload['number'] == pr.number

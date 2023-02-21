@@ -541,10 +541,15 @@ impl std::fmt::Display for MergeError {
             Self::NotFound => f.write_str("Something was not found."),
             Self::Conflict => f.write_str("Conflict"),
             Self::NoTree => f.write_str("Never found a tree object"),
-            Self::InvalidObjectType(kind) =>
-                write!(f, "Invalid object type, expected {}, found {}", Kind::Tree, kind),
-            Self::Corrupted(oid, kind) =>
-                write!(f, "Found corrupted object {} ({})", oid.to_hex(), kind),
+            Self::InvalidObjectType(kind) => write!(
+                f,
+                "Invalid object type, expected {}, found {}",
+                Kind::Tree,
+                kind
+            ),
+            Self::Corrupted(oid, kind) => {
+                write!(f, "Found corrupted object {} ({})", oid.to_hex(), kind)
+            }
         }
     }
 }

@@ -39,7 +39,7 @@ def check(req, r, delete=True):
             return r
     raise Exception(f"Never saw repository {r.url!r}")
 
-def test_create_init(request, user, org):
+def test_basic(request, user, org):
     # TODO: should probably have an entire file dedicated to how wonky
     # and inconsistent the contents API is
     r = check(request, user.create_repo(__name__))
@@ -59,6 +59,32 @@ def test_create_init(request, user, org):
         "documentation_url": "https://docs.github.com/rest/reference/repos#create-or-update-file-contents",
     }
 
+    # FIXME: ideally should have a sacrificial "real" user which could be used
+    # to test "real" additions
+    with pytest.raises(gh.GithubException) as ghe:
+        r.add_to_collaborators("dummy-central-this-user-should-not-exist")
+    assert ghe.value.status == 404
+    assert ghe.value.data == {
+        "message": "Not Found",
+        "documentation_url": "https://docs.github.com/rest/collaborators/collaborators#add-a-repository-collaborator",
+    }
+    # this is a weirdo pseudo-user, but apparently it can be invited to repos
+    r.add_to_collaborators("web-flow")
+    # what if we invite the user twice?
+    r.add_to_collaborators("web-flow")
+    # what about inviting self?
+    # with pytest.raises(gh.GithubException) as ghe:
+    #     r.add_to_collaborators(user.login)
+    # assert ghe.value.status == 422
+    # assert ghe.value.data == {
+    #     "message": "Validation Failed",
+    #     "errors": [{
+    #         "resource": "Repository",
+    #         "code": "custom",
+    #         "message": "Repository owner cannot be a collaborator"
+    #     }],
+    #     "documentation_url": "https://docs.github.com/rest/reference/repos#add-a-repository-collaborator"
+    # }
 
 def test_create_no_user(pytestconfig, request):
     with pytest.raises(gh.GithubException) as ghe:

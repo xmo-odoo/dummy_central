@@ -4,8 +4,6 @@ version = "0.1.0"
 authors = ["Xavier Morel <xmo@odoo.com>"]
 edition = "2021"
 
-[profile.dev]
-
 [profile.release]
 overflow-checks = true
 #debug = true
@@ -14,6 +12,7 @@ lto = "thin"
 [workspace]
 
 [dependencies]
+axum = { version = "*", features = ["macros"] }
 base64 = "*"
 bytes = "*"
 flate2 = "*"
@@ -30,6 +29,7 @@ guard = "*"
 headers = "*"
 hex = "*"
 hmac = "*"
+http = "0.2.8"
 hyper = "*"
 libsqlite3-sys = "*"
 once_cell = "*"
@@ -46,11 +46,10 @@ sha-1 = "*"
 sha2 = "*"
 smallvec = "*"
 structopt = "*"
-tempfile = "3.3.0"
+tempfile = "*"
 tokio = { version = "*", features = ["full"] }
-tower = { version = "*", features = ["make", "timeout"] }
-tower-http = { version = "*", features = ["trace", "catch-panic", "set-header"] }
+tower = { version = "*", features = ["make"] }
+tower-http = { version = "*", features = ["trace", "catch-panic", "set-header", "timeout"] }
 tracing = "*"
 tracing-futures = "*"
 tracing-subscriber = "*"
-warp = "*"

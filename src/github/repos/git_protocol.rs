@@ -1,3 +1,8 @@
+use axum::extract::{Path, Query, State};
+use axum::response::{IntoResponse, Response};
+use axum::routing::{get, post};
+use axum::Router;
+use bytes::Buf;
 use flate2::read::ZlibDecoder;
 use flate2::FlushDecompress;
 use git_features::decode::leb64_from_read;
@@ -11,10 +16,10 @@ use git_pack::data::output::{Count, Entry as PackEntry};
 use git_pack::data::Version;
 use guard::guard;
 use headers::HeaderMap;
+use http::StatusCode;
 use std::collections::HashMap;
 use std::io::{BufReader, Read, Write};
 use std::sync::RwLock;
-use warp::*;
 
 use crate::github::{Authorization, Error, St};
 use crate::model::users::find_current_user;
@@ -22,36 +27,15 @@ use crate::model::Source;
 
 pub use github_types::git::*;
 
-pub fn routes<T>(
-    base: T,
-) -> impl Filter<Extract = impl Reply, Error = Rejection> + Clone
-where
-    T: Filter<Extract = (Authorization, St, String, String), Error = Rejection>
-        + Clone
-        + Send
-        + Sync
-        + 'static,
-{
-    let base = base.and(header::optional("git-protocol"));
-
-    base.clone()
-        .and(path!("info" / "refs"))
-        .and(get())
-        .and(query())
-        .map(git_refs)
-        .boxed()
-        .or(base
-            .clone()
-            .and(path!("git-upload-pack").and(post()).and(body::bytes()))
-            .map(git_upload_pack)
-            .boxed())
-        .or(base
-            .and(path!("git-receive-pack"))
-            .and(header::headers_cloned())
-            .and(post())
-            .and(body::bytes())
-            .map(git_receive_pack)
-            .boxed())
+pub fn routes() -> Router<St> {
+    // FIXME: add middleware because parent may extract the repo name w/
+    // extension which needs to be stripped
+    // https://docs.rs/axum/latest/axum/middleware/index.html#passing-state-from-middleware-to-handlers
+    // TODO: add extractor for the Protocol instead of doing it by hand
+    Router::new()
+        .route("/info/refs", get(git_refs))
+        .route("/git-upload-pack", post(git_upload_pack))
+        .route("/git-receive-pack", post(git_receive_pack))
 }
 
 #[derive(serde::Deserialize)]
@@ -79,17 +63,18 @@ fn write_ref<W: std::io::Write>(
         caps,
     )
 }
-fn git_refs(
-    auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    protocol: Option<String>,
-    Service { service }: Service,
-) -> impl Reply {
+async fn git_refs(
+    auth: Option<Authorization>,
+    State(st): State<St>,
+    Path((owner, name)): Path<(String, String)>,
+    headers: HeaderMap,
+    Query(Service { service }): Query<Service>,
+) -> Response {
+    let protocol = headers.get("git-protocol");
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let name = name.strip_suffix(".git").unwrap_or(&name);
+    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
         return http::StatusCode::NOT_FOUND.into_response();
     });
 
@@ -97,13 +82,10 @@ fn git_refs(
         "git-upload-pack" => Some("multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed allow-tip-sha1-in-want allow-reachable-sha1-in-want no-done filter object-format=sha1"),
         "git-receive-pack" => {
             if auth.is_none() {
-                return reply::with_header(
-                    reply::with_status(
-                        b"No anonymous write access.".as_slice(),
-                        http::StatusCode::UNAUTHORIZED
-                    ),
-                    http::header::WWW_AUTHENTICATE.as_str(),
-                    "Basic realm=\"GitHub\""
+                return (
+                    http::StatusCode::UNAUTHORIZED,
+                    [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
+                    b"No anonymous write access.".as_slice(),
                 ).into_response();
             }
             Some("no-thin delete-refs quiet side-band-64k ofs-delta")
@@ -114,7 +96,7 @@ fn git_refs(
     let service_len = "0000".len() + "# service=".len() + service.len() + 1;
     let mut resp =
         format!("{service_len:04x}# service={service}\n0000").into_bytes();
-    if protocol.as_deref() == Some("version=1") {
+    if protocol.and_then(|h| h.to_str().ok()) == Some("version=1") {
         resp.extend(b"000eversion 1\n")
     }
 
@@ -129,12 +111,14 @@ fn git_refs(
     //       detached heads
     resp.extend(b"0000");
 
-    reply::with_header(
-        reply::with_status(resp, http::StatusCode::OK),
-        "Content-Type",
-        &format!("application/x-{service}-advertisement"),
+    (
+        [(
+            "Content-Type",
+            format!("application/x-{service}-advertisement"),
+        )],
+        resp,
     )
-    .into_response()
+        .into_response()
 }
 
 #[repr(u8)]
@@ -143,17 +127,14 @@ enum Sideband {
     Progress = 2,
     Error = 3,
 }
-fn git_upload_pack(
-    _: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    protocol: Option<String>,
-    _: bytes::Bytes,
-) -> impl Reply {
+async fn git_upload_pack(
+    State(st): State<St>,
+    Path((owner, name)): Path<(String, String)>,
+) -> Response {
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let name = name.strip_suffix(".git").unwrap_or(&name);
+    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
         return http::StatusCode::NOT_FOUND.into_response()
     });
 
@@ -203,39 +184,33 @@ fn git_upload_pack(
     response.extend(pack);
     response.extend(b"0000");
 
-    reply::with_header(
-        reply::with_status(response, http::StatusCode::OK),
-        "Content-Type",
-        "application/x-git-upload-pack-result",
+    (
+        [("Content-Type", "application/x-git-upload-pack-result")],
+        response,
     )
-    .into_response()
+        .into_response()
 }
 
-fn git_receive_pack(
+async fn git_receive_pack(
     auth: Authorization,
-    st: St,
-    owner: String,
-    name: String,
-    protocol: Option<String>,
-    headers: HeaderMap,
+    State(st): State<St>,
+    Path((owner, name)): Path<(String, String)>,
     data: bytes::Bytes,
-) -> impl Reply {
+) -> Response {
     // FIXME: how is auth supposed to pass to receive-pack? The auth doesn't
     //        seem to be getting passed in which seems odd...
     // FIXME: differentiate between unauth and incorrect auth?
     let mut db = Source::get();
     let tx = db.token_eager();
+    let name = name.strip_suffix(".git").unwrap_or(&name);
     guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return reply::with_header(
-            reply::with_status(
-                b"No anonymous write access.".as_slice(),
-                http::StatusCode::UNAUTHORIZED
-            ),
-            http::header::WWW_AUTHENTICATE.as_str(),
-            "Basic realm=\"GitHub\""
+        return (
+            http::StatusCode::UNAUTHORIZED,
+            [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
+            b"No anonymous write access.".as_slice(),
         ).into_response();
     });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, name) else {
         // FIXME: how does that react?
         return http::StatusCode::NOT_FOUND.into_response();
     });
@@ -453,10 +428,9 @@ fn git_receive_pack(
     // end of outer message
     response.extend(b"0000");
 
-    reply::with_header(
-        reply::with_status(response, http::StatusCode::OK),
-        "Content-Type",
-        "application/x-git-receive-pack-result",
+    (
+        [("Content-Type", "application/x-git-receive-pack-result")],
+        response,
     )
-    .into_response()
+        .into_response()
 }
