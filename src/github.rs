@@ -7,6 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{async_trait, Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
+use git_object::Blob;
+use git_object::bstr::{BString, BStr};
 use guard::guard;
 use hmac::{Hmac, Mac};
 use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
@@ -52,6 +54,7 @@ struct GithubError<'a> {
 #[derive(Serialize, Copy, Clone)]
 struct GithubErrorDetails<'a> {
     resource: &'a str,
+    #[serde(skip_serializing_if = "<str>::is_empty")]
     field: &'a str,
     code: &'a str,
     #[serde(skip_serializing_if = "<str>::is_empty")]
@@ -555,6 +558,40 @@ async fn create_repository(
     });
 
     info!("Created repository {}/{}", owner.login, name);
+    if request.auto_init {
+        let readme = crate::model::git::store(
+            &tx, repo.network, git_object::BlobRef::from_bytes(b"").unwrap()
+        );
+        let mut t = git_object::TreeRef::empty();
+        t.entries.push(git_object::tree::EntryRef {
+            mode: git_object::tree::EntryMode::Blob,
+            filename: "README".into(),
+            oid: &readme,
+        });
+        let tree = crate::model::git::store(&tx, repo.network, t);
+        let sig = git_actor::SignatureRef {
+            name: u.login.as_ref().into(),
+            // FIXME: email for default signature?
+            email: u
+                .email
+                .as_ref()
+                .map(Cow::as_ref)
+                .unwrap_or("user@example.org")
+                .into(),
+            time: git_actor::Time::now_utc(),
+        };
+        let c = crate::model::git::store(&tx, repo.network, git_object::CommitRef {
+            tree: BString::from(tree.to_hex().to_string()).as_ref(),
+            parents: Default::default(),
+            author: sig.clone(),
+            committer: sig,
+            encoding: None,
+            message: BStr::new(b"Initial commit"),
+            extra_headers: Vec::new(),
+        });
+        crate::model::git::refs::create(
+            &tx, repo.id, &format!("refs/heads/{}", repo.default_branch), &c);
+    }
     let r = Json(repo.to_response(&tx, &st.root)).into_response();
     tx.commit().unwrap();
     Ok(r)

@@ -8,12 +8,13 @@ import random
 import subprocess
 import threading
 import time
-import urllib.parse
 from wsgiref.simple_server import make_server, WSGIRequestHandler
 
 import github as pygithub
 import pytest
 import requests
+
+from . import make_branch, safe_delete
 
 #pygithub.enable_console_debug_logging()
 
@@ -196,11 +197,15 @@ def endpoint(request, make_tunnel):
 
         delete()
 
+def random_id(n):
+    return base64.b32encode(os.urandom(n)).decode()
+
+
 @pytest.fixture(scope='session')
 def repo(org, config):
     # fixme: random name?
-    repo_id = base64.b32encode(os.urandom(5)).decode()
-    r = org.create_repo(f'default-repo-{repo_id}')
+    # FIXME: add a per-test autofixture which cleans up the repo?
+    r = org.create_repo(f'default-repo-{random_id(5)}', auto_init=True)
     s = requests.Session()
     s.headers['Authorization'] = f'token {config["token"]}'
     for t in [1, 1, 2, 3, 5, 8, 13, 21, 34, 55]:
@@ -210,13 +215,14 @@ def repo(org, config):
     else:
         raise Exception(f"Never saw repository {r.url!r}")
 
-    # create garbage on the default branch
-    r.create_file(path='dummy', message="dummy", content="dummy")
     yield r
 
-    try:
-        r.delete()
-    except pygithub.GithubException as e:
-        if e.status == 404:
-            return
-        raise
+    safe_delete(r)
+
+@pytest.fixture(scope='module') # have every thing work off of the same pr
+def pr(repo, config):
+    branchname = random_id(12)
+    ref = make_branch(repo, branchname)
+    yield repo.create_pull("test", "", base=repo.default_branch, head=branchname)
+    ref.delete()
+

@@ -1,26 +1,18 @@
+import time
 from contextlib import suppress
+from itertools import islice
+
 import github
 import pytest
 import requests
 from github import GithubException, InputGitTreeElement as item
 
-# tree(path: str, mode: str, type: str, content: str | sha)
-def pr_payload(e):
-    event, payload = e
-    assert event == "pull_request"
-    return payload
+from ...import pr_payload, check, _fib
 
-def set_file(repo, ref, *, message, name, content):
-    assert ref.object.type == 'commit'
-    previous = repo.get_git_commit(ref.object.sha)
-    t = repo.create_git_tree([
-        item(name, '100644', 'blob', content)
-    ], base_tree=previous.tree)
-    c = repo.create_git_commit(message, t, [previous])
-    ref.edit(c.sha)
-    return c
+def test_basic(repo, config, endpoint, request, users, is_github):
+    # dumb...
+    sep = '/' if is_github else ''
 
-def test_create_pr(repo, config, endpoint, request, users):
     url, get_hook = endpoint
     h = repo.create_hook("web", {
         'url': url,
@@ -116,7 +108,7 @@ def test_create_pr(repo, config, endpoint, request, users):
             "code": "missing_field",
             "field": "title"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/pulls#update-a-pull-request"
+        "documentation_url": f"https://docs.github.com/rest/reference/pulls{sep}#update-a-pull-request"
     }
 
     # immediately test webhook, helps delaying actions
@@ -145,9 +137,7 @@ def test_create_pr(repo, config, endpoint, request, users):
     assert pr.body is None
     payload = pr_payload(get_hook())
     assert payload['action'] == 'edited', payload
-    # ok what the fuck now? why does *removing* the body also lead to
-    # an empty changes object?
-    assert payload['changes'] == {}, payload
+    assert payload['changes'] == {'body': {'from': 'test'}}, payload
     assert payload['pull_request']['body'] is None, payload
 
     pr.edit(state='closed')
@@ -188,12 +178,12 @@ def test_create_pr(repo, config, endpoint, request, users):
             "field": "base",
             "code": "invalid"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/pulls#update-a-pull-request"
+        "documentation_url": f"https://docs.github.com/rest/reference/pulls{sep}#update-a-pull-request"
     }
 
     p = repo.get_pull(pr.number)
     assert p.title == 'test2'
-    assert p.body == None
+    assert p.body is None
     assert p.state == 'open'
     assert p.base.ref == 'main2'
 
@@ -206,7 +196,7 @@ def test_create_pr(repo, config, endpoint, request, users):
     assert r.status_code == 422, r.json()
     assert r.json() == {
         'message': 'Validation Failed',
-        'documentation_url': 'https://docs.github.com/rest/reference/pulls#update-a-pull-request',
+        'documentation_url': f'https://docs.github.com/rest/reference/pulls{sep}#update-a-pull-request',
         'errors': [{
             'code': 'missing_field',
             'field': 'title',
@@ -232,7 +222,7 @@ def test_create_pr(repo, config, endpoint, request, users):
         assert r.ok, res
         assert res['body'] == expected, f"{value} -> {res['body']} != {expected}"
 
-def test_create_pr_fake_cross_repo(repo, org):
+def test_fake_cross_repo(repo, org):
     d = repo.get_commit(f'refs/heads/{repo.default_branch}')
     d_head = d.commit
     t = repo.create_git_tree([
@@ -248,7 +238,7 @@ def test_create_pr_fake_cross_repo(repo, org):
     assert pr.head.sha == c.sha
     assert pr.head.repo == repo
 
-def test_create_pr_cross_repo(request, user, repo):
+def test_cross_repo(request, user, repo):
     # try to create a pr even though we don't have a fork yet
     with pytest.raises(GithubException) as ghe:
         repo.create_pull("cross", "", base=repo.default_branch, head=f'{user.login}:create_pr_cross')
@@ -263,22 +253,27 @@ def test_create_pr_cross_repo(request, user, repo):
         'message': 'Validation Failed'
     }
 
-    f = repo.create_fork()
-    request.addfinalizer(f.delete)
+    f = check(request, repo.create_fork())
 
-    d = f.get_commit(f'refs/heads/{repo.default_branch}')
-    d_head = d.commit
+    for t in islice(_fib(), 12):
+        with suppress(GithubException):
+            head = f.get_commit(f'refs/heads/{repo.default_branch}').commit
+            break
+        time.sleep(t)
+    else:
+        raise AssertionError(f"Never saw refs/heads/{repo.default_branch}")
+
     t = f.create_git_tree([
         item('foo', '100644', 'blob', 'blorp'),
-    ], base_tree=d_head.tree)
-    c = f.create_git_commit("a commit", t, [d_head])
+    ], base_tree=head.tree)
+    c = f.create_git_commit("a commit", t, [head])
     f.create_git_ref('refs/heads/create_pr_cross', c.sha)
 
     pr = repo.create_pull("cross", "", base=repo.default_branch, head=f'{user.login}:create_pr_cross')
     assert pr.head.sha == c.sha
     assert pr.head.repo != repo
 
-def test_create_pr_from_issue(repo):
+def test_from_issue(repo):
     issue = repo.create_issue("an issue")
     with pytest.raises(GithubException) as ghe:
         repo.get_pull(issue.number)
@@ -357,30 +352,4 @@ def test_create_pr_from_pr(repo):
         "documentation_url": "https://docs.github.com/rest/reference/pulls#create-a-pull-request"
     }
 
-def test_synchronize(repo, config, endpoint, request):
-    url, get_hook = endpoint
-    h = repo.create_hook("web", {
-        'url': url,
-        'content_type': 'json',
-    }, ['pull_request'], active=True)
-    assert get_hook()[0] == 'ping'
-    request.addfinalizer(h.delete)
 
-    d = repo.get_commit(f'refs/heads/{repo.default_branch}')
-    pr_branch = repo.create_git_ref('refs/heads/pr', d.commit.sha)
-    init = set_file(repo, pr_branch, message="a commit", name='foo', content='blorp')
-
-    pr = repo.create_pull("test", "", base=repo.default_branch, head="pr")
-    payload = pr_payload(get_hook())
-    assert payload['action'] == 'opened'
-    update = set_file(repo, pr_branch, message='an other', name='foo', content='blorp again')
-    payload = pr_payload(get_hook())
-    assert payload['action'] == 'synchronize'
-    assert payload['number'] == pr.number
-    # webhook has undocumented "before" and "after" keys, which could
-    # be useful but... (also not `changes` for some reason)
-    assert payload.keys() > {'action', 'number', 'pull_request', 'repository'}
-    head = payload['pull_request']['head']
-    assert head['ref'] == 'pr'
-    assert head['label'] == f'{repo.owner.login}:pr'
-    assert head['sha'] == update.sha

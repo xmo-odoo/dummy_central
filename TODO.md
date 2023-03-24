@@ -1,17 +1,3 @@
-- [ ] convert github types to strongly typed ids. Q: where should the ids live,
-      github types, models, both & convert?
-
-      logic: *way* too easy to use the wrong id, in the wrong place, even with
-      matching types
-- [ ] switch from warp to axum
-
-      - better API around errors (no need to `into_response` *everything*)
-      - maybe better compilation time because smaller types
-        (though boxing has improved things)
-      - however conversions are kinda shit compared to warp
-      - but needs to be changed after looking at how github handles it, and
-        dunno who'd come ahead
-
 Before any sort of release
 --------------------------
 
@@ -28,7 +14,8 @@ Before any sort of release
   a json is not great
 - tracing! currently it ~exists~ but debug is way too verbose to track
   req/res, and what's happening should be way more observable
-- reorganise test suite? idk
+  - can configure tower-http's tracing to change the logging level of
+    req/resp
 - webhooks delivery backchannel, that's a primary reason why I started
   DC in the first place!
 

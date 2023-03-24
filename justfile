@@ -56,12 +56,15 @@ _users:
     # ensure we first serialize to json, and only write if that succeeded
     jsonfile.write_text(json.dumps(contents, indent=4), encoding='utf-8')
 
+lint:
+    ruff check --ignore E501 tests
+
 # validates the test suite against github actual, args are passed to pytest
-validate *args:
+validate *args: lint
     pytest "$@"
 
 # runs the test suite against a dummy_central instance (launched automatically), args are passed to pytest
-test *args: _users
+test *args: _users lint
     #!/bin/sh
     PORTFILE=$(mktemp -d)/portfile
     cargo r -- users.json --portfile "$PORTFILE" &

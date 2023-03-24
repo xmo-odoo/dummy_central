@@ -670,11 +670,7 @@ async fn update_pull_request(
                             title: title.as_ref().map(|_| {
                                 webhooks::Change::from(pr.issue.title.clone())
                             }),
-                            body: body
-                                .as_ref()
-                                .and_then(Option::as_ref)
-                                .and_then(|_| pr.issue.body.clone())
-                                .map(webhooks::Change::from),
+                            body: body.as_ref().and_then(|_| pr.issue.body.clone().map(webhooks::Change::from)),
                             base: new_base.filter(|&b| b != &pr.base).map(
                                 |_| webhooks::PrBaseChange {
                                     r#ref: pr.base.clone().into(),

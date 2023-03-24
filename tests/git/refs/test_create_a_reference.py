@@ -1,11 +1,10 @@
-import copy
-
 import pytest
 from github import GithubException
 
 MISSING_OID = 'eeed0456ca0e8d129a91bd4826732ab95a3edbb6'
 
-def test_get_commit_wrong_type(repo):
+def test_invalid_refs(repo):
+
     with pytest.raises(GithubException) as ghe:
         repo.create_git_ref('refs/heads/missing', MISSING_OID)
     assert ghe.value.status == 422
@@ -50,27 +49,13 @@ def test_get_commit_wrong_type(repo):
         'message': 'Reference already exists'
     }
 
-    with pytest.raises(GithubException) as ghe:
-        repo.get_commit('refs/others/nonsense')
-    assert ghe.value.status == 422
-    assert ghe.value.data == {
-        "message": "No commit found for SHA: refs/others/nonsense",
-        "documentation_url": "https://docs.github.com/rest/commits/commits#get-a-commit"
-    }
-    with pytest.raises(GithubException) as ghe:
-        repo.get_commit('others/nonsense')
-    assert ghe.value.status == 422
-    assert ghe.value.data == {
-        "message": "No commit found for SHA: others/nonsense",
-        "documentation_url": "https://docs.github.com/rest/commits/commits#get-a-commit"
-    }
-
     o = repo.get_git_ref('others/nonsense').object
     assert o.type == 'blob'
     assert o.sha == b.sha
 
     c = repo.create_git_blob("test2", "utf-8")
     ref.edit(c.sha)
+    assert repo.get_git_ref('others/nonsense').object.sha == c.sha
 
     assert [r.ref for r in repo.get_git_refs()] == [f'refs/heads/{repo.default_branch}', 'refs/others/nonsense']
 
@@ -82,13 +67,3 @@ def test_get_commit_wrong_type(repo):
         'documentation_url': 'https://docs.github.com/rest/reference/git#delete-a-reference',
          'message': 'Reference does not exist'
     }
-
-def test_commit_empty(repo):
-    init = repo.get_commit('refs/heads/' + repo.default_branch).commit
-    desc = repo.create_git_commit(
-        message="test empty",
-        tree=init.tree,
-        parents=[init]
-    )
-
-    assert desc.tree == init.tree

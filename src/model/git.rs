@@ -5,7 +5,7 @@ use git_diff::tree::{recorder::Change, Changes, Recorder, State};
 use git_hash::{oid, ObjectId};
 use git_object::{
     tree::Entry, Commit, CommitRef, Kind, Object, ObjectRef, TagRef, Tree,
-    TreeRefIter,
+    TreeRefIter, bstr::BStr,
 };
 use rusqlite::{types::ValueRef, OptionalExtension};
 use sha1::{Digest, Sha1};
@@ -249,17 +249,17 @@ pub fn store(
     oid
 }
 
-/// Resolves oid until a tree object, retuens the tree, fails if it reached a
+/// Resolves oid until a tree object, returns the tree, fails if it reached a
 /// dead-end (a blob) or an oid which doesn't exist
 pub fn load_tree(
     tx: &Token,
     network: Network,
     oid: &oid,
-) -> Option<impl Iterator<Item = Entry> + Clone> {
+) -> Option<Vec<Entry>> {
     let mut object_id = oid.to_owned();
     loop {
         object_id = match load(tx, network, &object_id)? {
-            Object::Tree(t) => return Some(t.entries.into_iter()),
+            Object::Tree(t) => return Some(t.entries),
             Object::Blob(_) => return None,
             Object::Commit(c) => c.tree,
             Object::Tag(t) => t.target,
@@ -267,14 +267,35 @@ pub fn load_tree(
     }
 }
 
+pub fn find_blob(
+    tx: &Token,
+    network: Network,
+    path: &str,
+    mut entries: Vec<Entry>,
+) -> Option<(ObjectId, git_object::Blob)> {
+    'path: for p in path.split('/') {
+        let entry = std::mem::take(&mut entries).into_iter()
+            .find(|e| &e.filename == BStr::new(p.as_bytes()))?;
+
+        match load(tx, network, &entry.oid)? {
+            Object::Blob(b) => return Some((entry.oid, b)),
+            Object::Tree(t) => {
+                entries = t.entries;
+            },
+            Object::Commit(_) | Object::Tag(_) => break ,
+        }
+    }
+    None
+}
+
 pub fn find_tree(
     tx: &Token,
     network: Network,
     oid: &oid,
-) -> Option<impl Iterator<Item = Entry>> {
+) -> Option<Vec<Entry>> {
     load(tx, network, oid)
         .and_then(|o| o.try_into_tree().ok())
-        .map(|t| t.entries.into_iter())
+        .map(|t| t.entries)
 }
 
 pub fn log<'a, 'b: 'a>(

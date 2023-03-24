@@ -1,5 +1,4 @@
 import base64
-import itertools
 import hashlib
 import string
 
@@ -26,23 +25,20 @@ def test_create_blob(repo):
 
     contents = "Blòb created by PyGithub"
     b0 = repo.create_git_blob(contents, 'utf-8')
+    assert b0.sha == blob(contents)
     b1 = repo.create_git_blob(contents, '')
     assert b0.sha == b1.sha
-    assert b1.sha == blob(contents)
 
-    # utf8:   'Oh l\xc3\xa0 l\xc3\xa0'
-    # latin1: 'Oh l\xe0 l\xe0'
-    content = 'Oh là là'
-    weird = repo.create_git_blob(content, 'latin1')
-    weird = repo.get_git_blob(weird.sha)
-    assert base64.b64decode(weird.content) == content.encode('utf-8'),\
+    weird = repo.create_git_blob(contents, 'latin1')
+    assert weird.sha == b0.sha,\
         "github treats any `encoding` other than base64 as `utf-8`, which" \
         " effectively means literal text"
-    assert weird.sha == blob(content)
+    # FIXME: on github the encoding is optional and defaults to utf-8, but
+    #        pygithub requires an encoding which is dumb.
 
 @pytest.mark.parametrize('n', range(35, 40))
 def test_blob_encoding(repo, n):
-    """github apparently returns the result of Base64.encode64: 
+    """github apparently returns the result of Base64.encode64:
     newline-terminated segments of 60 encoded characters
     """
     val = 'a'*n
@@ -109,7 +105,7 @@ def test_decode64(encoded, transcoded):
 
     - it skips all non-base64 content
     - it stops when the source ends (so doesn't care *at all* for padding)
-    - it stops iff the 3rd or 4th character of a chunk (of 4) is an `=`, 
+    - it stops iff the 3rd or 4th character of a chunk (of 4) is an `=`,
       otherwise it skips the `=`
     """
     assert base64.b64encode(decode64(encoded)) == transcoded

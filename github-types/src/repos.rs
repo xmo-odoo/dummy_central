@@ -127,6 +127,8 @@ pub struct RepositoryResponse {
 #[derive(Deserialize)]
 pub struct CreateRepositoryRequest {
     pub name: String,
+    #[serde(default)]
+    pub auto_init: bool,
 }
 
 #[derive(Deserialize)]

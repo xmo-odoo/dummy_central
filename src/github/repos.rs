@@ -305,6 +305,8 @@ async fn create_fork(
 
     // if the prospective new owner already has a fork (or source,
     // same diff), return that directly
+    // FIXME: not the case anymore for organisations (cf 2023-02-16 update,
+    //        github blob label innersource)
     if let Some(existing) =
         crate::model::repos::find_fork(&tx, repo.id, new_owner.id)
     {
@@ -759,21 +761,10 @@ async fn create_or_update_contents(
     let target_ref = format!("refs/heads/{branch_name}");
     let branch_head =
         crate::model::git::refs::resolve(&tx, repo.id, &target_ref);
-    // TODO: if we had a branch, we'd have to check if
-    //       there was already a file at the given
-    //       path, and if so check what happens if the
-    //       sha is missing or incorrect
 
-    // anyway here we're in the straightforward case
-    // of creating everything from scratch
-    assert!(branch_head.is_none(), "FIXME: we only use this endpoint to create repos because github raises an error on the other \"data\" endpoints");
-    if !crate::model::git::get_objects(&tx, repo.network).is_empty() {
-        // GH triggers an error when trying to create content in a
-        // branch which doesn't exist, but only the second time around
-        // (if there's already data in the repo)
-        return Err(Error::NotFound2(&format!(
-            "Branch {branch_name} not found"
-        ))
+    // GH only allows a branch which doesn't exist if the repository is empty
+    if branch_head.is_none() && !crate::model::git::get_objects(&tx, repo.network).is_empty() {
+        return Err(Error::NotFound2(&format!("Branch {branch_name} not found"))
         .into_response("repos", "create-or-update-file-contents")
         .into_response());
     }
@@ -786,14 +777,26 @@ async fn create_or_update_contents(
         crate::model::git::store(&tx, repo.network, git_object::Blob { data });
     let file_oid = oid;
     let mut mode = git_object::tree::EntryMode::Blob;
-    // TODO: what if path is an empty string?
-    // FIXME: need to lookup trees in order to create
-    //        updated tree from them, so this has to
-    //        go forwards to deref' the trees then
-    //        back to zip them up
-    // FIXME: why is Tree.entries not a BTreeSet if
-    //        the files must be sorted by filename
-    //        (and probably unique)?
+    // if we had a branch, we'd have to check if there was already a file at
+    // the given path, and if so check what happens if the sha is missing or
+    // incorrect
+    if let Some(oid) = branch_head {
+        let entries = crate::model::git::load_tree(
+            &tx, repo.network, &oid).unwrap();
+        // TODO: what if we find and object but it's not a blob?
+        if let Some((oid, _)) = crate::model::git::find_blob(&tx, repo.network, &path, entries) {
+            // TODO: what's the error?
+            assert_eq!(
+                Some(oid.to_hex().to_string()),
+                request.sha,
+                "when modifying a blob, the old blob's hex must be provided"
+            );
+        }
+    }
+
+    // FIXME: need to lookup trees in order to create updated tree from them,
+    //        so this has to go forwards to deref' the trees then back to zip
+    //        them up
     for segment in path.as_str().rsplit('/') {
         oid = crate::model::git::store(
             &tx,
@@ -820,33 +823,34 @@ async fn create_or_update_contents(
             .into(),
         time: Time::now_utc(),
     };
-    // oid is now the root tree
-    let commit_oid = crate::model::git::store(
-        &tx,
-        repo.network,
-        git_object::Commit {
-            tree: oid,
-            parents: SmallVec::new(),
-            author: request
-                .author
-                .map_or_else(|| default_signature.clone(), Into::into),
-            committer: request.committer.map_or(default_signature, Into::into),
-            encoding: None,
-            message: request.message.trim().into(),
-            extra_headers: Vec::new(),
-        },
-    );
-    crate::model::git::refs::create(&tx, repo.id, &target_ref, &commit_oid);
-    // since this is only the baseline init, re-set the default branch of the
-    // repo: when init-ing, the repo's default branch is updated to whatever the
-    // contents call specifies
-    if let Some(b) = request.branch {
-        crate::model::repos::update_repository(&tx, repo.id, None, Some(&b));
+    let mut parents = SmallVec::new();
+    if let Some(h) = branch_head {
+        parents.push(h);
     }
-
-    let commit = crate::model::git::load(&tx, repo.network, &commit_oid)
-        .unwrap()
-        .into_commit();
+    let commit = git_object::Commit {
+        tree: oid,
+        parents,
+        author: request
+            .author
+            .map_or_else(|| default_signature.clone(), Into::into),
+        committer: request.committer.map_or(default_signature, Into::into),
+        encoding: None,
+        message: request.message.trim().into(),
+        extra_headers: Vec::new(),
+    };
+    // oid is now the root tree
+    let commit_oid = crate::model::git::store(&tx, repo.network, &commit);
+    if let Some(h) = branch_head {
+        crate::model::git::refs::update(&tx, repo.id, &target_ref, &h, &commit_oid);
+    } else {
+        crate::model::git::refs::create(&tx, repo.id, &target_ref, &commit_oid);
+        // baseline init (calling endpoint on an empty repository) => reset the
+        // default branch of the repository to whichever branch was used here
+        // (nb: re-setting to default branch if none was provided but shrug)
+        if let Some(b) = request.branch {
+            crate::model::repos::update_repository(&tx, repo.id, None, Some(&b));
+        }
+    }
     tx.commit().unwrap();
 
     // replies with 200 for an update (?) and 201 for
@@ -1151,10 +1155,19 @@ async fn add_collaborator(
 ) -> Result<(StatusCode, Json<RepositoryInvitation>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token();
-    guard!(let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name) else {
+    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response_full("collaborators", "collaborators", "add-a-repository-collaborator"));
     });
-    if !crate::model::repos::add_collaborator(&tx, repo_id, new_collaborator) {
+    if new_collaborator == repo.owner.login {
+        static DEETS: &[crate::github::GithubErrorDetails<'_>] = &[Error::details(
+            "Repository",
+            "",
+            "custom",
+            "Repository owner cannot be a collaborator",
+        )];
+        return Err(Error::Unprocessable("Validation Failed", DEETS).into_response_full("reference", "repos", "add-a-repository-collaborator"));
+    }
+    if !crate::model::repos::add_collaborator(&tx, repo.id, new_collaborator) {
         return Err(Error::NotFound
             .into_response_full("collaborators", "collaborators", "add-a-repository-collaborator"));
     };
