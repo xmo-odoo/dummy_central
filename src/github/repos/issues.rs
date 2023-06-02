@@ -3,7 +3,6 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use git_hash::ObjectId;
-use guard::guard;
 use hex::ToHex;
 use rusqlite::OptionalExtension as _;
 use serde::{Deserialize, Serialize};
@@ -281,9 +280,9 @@ async fn get_pull_request(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(pr_id) = prs::find_id(tx, &owner, &name, pull_number) else {
+    let Some(pr_id) = prs::find_id(tx, &owner, &name, pull_number) else {
         return Err(Error::NotFound.into_response("pulls", "get-a-pull-request"));
-    });
+    };
 
     Ok(Json(pr_response(tx, &st, pr_id)))
 }
@@ -294,9 +293,9 @@ async fn get_pull_request_commits(
 ) -> Result<Json<Vec<CommitsResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(pr) = prs::find_pr(tx, &owner, &name, pull_number) else {
+    let Some(pr) = prs::find_pr(tx, &owner, &name, pull_number) else {
         return Err(Error::NotFound.into_response("pulls", "list-commits-on-a-pull-request"));
-    });
+    };
 
     // not entirely sure how traversal is supposed to work so... just
     // brute-force it since our repos are unlikely to be any sort of large
@@ -332,9 +331,9 @@ async fn get_pull_request_commits(
         let mut commit_buf = Vec::new();
         // TODO: does github traverse this breadth-first or depth-first?
         for i in 0.. {
-            guard!(let Some(oid) = oids.get(i).copied() else {
+            let Some(oid) = oids.get(i).copied() else {
                 break;
-            });
+            };
 
             commit_buf.clear();
             let (kind, data) = crate::model::git::get_in(
@@ -371,12 +370,12 @@ async fn create_pull_request(
     let mut db = Source::get();
     let tx = db.token_eager();
 
-    guard!(let Some(user) = auth.and_then(|auth| crate::github::auth_to_user(&tx, auth)) else {
+    let Some(user) = auth.and_then(|auth| crate::github::auth_to_user(&tx, auth)) else {
         return Err(Error::NotFound.into_response("pulls", "create-a-pull-request").into_response());
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("pulls", "create-a-pull-request").into_response());
-    });
+    };
 
     let base_ref = format!("refs/heads/{}", req.base);
     let base = crate::model::git::refs::resolve(&tx, repo.id, &base_ref);
@@ -508,13 +507,13 @@ async fn update_pull_request(
     let mut db = Source::get();
     let tx = db.token_eager();
     let user = crate::github::auth_to_user(&tx, auth).unwrap();
-    guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
+    let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("pulls", "update-a-pull-request").into_response());
-    });
+    };
 
-    guard!(let Some(pr) = find_pr(&tx, &owner, &name, number) else {
+    let Some(pr) = find_pr(&tx, &owner, &name, number) else {
         return Err(Error::NotFound.into_response("pulls", "update-a-pull-request").into_response());
-    });
+    };
 
     // PR creator can edit pr, repo writers can edit PR as well
     if !prs::can_write(&tx, user.id, pr.id) {
@@ -670,7 +669,12 @@ async fn update_pull_request(
                             title: title.as_ref().map(|_| {
                                 webhooks::Change::from(pr.issue.title.clone())
                             }),
-                            body: body.as_ref().and_then(|_| pr.issue.body.clone().map(webhooks::Change::from)),
+                            body: body.as_ref().and_then(|_| {
+                                pr.issue
+                                    .body
+                                    .clone()
+                                    .map(webhooks::Change::from)
+                            }),
                             base: new_base.filter(|&b| b != &pr.base).map(
                                 |_| webhooks::PrBaseChange {
                                     r#ref: pr.base.clone().into(),
@@ -699,15 +703,15 @@ async fn create_review(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
-    });
-    guard!(let Some(pr) = prs::find_id(&tx, &owner, &name, pr) else {
+    };
+    let Some(pr) = prs::find_id(&tx, &owner, &name, pr) else {
         return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
-    });
+    };
 
     let commit_id = if let Some(cid) = req.commit_id {
         // TODO: what response for invalid id?
@@ -781,9 +785,9 @@ async fn list_reviews(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(pr) = prs::find_id(tx, &owner, &name, pr) else {
+    let Some(pr) = prs::find_id(tx, &owner, &name, pr) else {
         return Err(Error::NotFound.into_response("reviews", "list-reviews-for-a-pull-request"));
-    });
+    };
 
     // TODO: pagination
     let reviews = prs::reviews::list(tx, pr, |r| {
@@ -836,23 +840,28 @@ fn comment_to_response(
 
 async fn list_review_comments(
     State(st): State<St>,
-    Path((owner, name, pr_number, review_id)): Path<(String, String, usize, i64)>,
+    Path((owner, name, pr_number, review_id)): Path<(
+        String,
+        String,
+        usize,
+        i64,
+    )>,
 ) -> Result<Json<Vec<ReviewCommentResponse>>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
+    let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
         return Err(Error::NotFound.into_response(
             "reviews",
             "list-comments-for-a-pull-request-review",
         ));
-    });
-    guard!(let Some(review) = reviews::get_by_i64(tx, review_id) else {
+    };
+    let Some(review) = reviews::get_by_i64(tx, review_id) else {
         return Err(Error::NotFound.into_response(
             "reviews",
             "list-comments-for-a-pull-request-review",
         ));
-    });
+    };
     // TODO: what if the review is not on the PR?
     assert_eq!(pr_id, review.pull_request);
 
@@ -870,12 +879,12 @@ async fn list_pr_comments(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
+    let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
         return Err(Error::NotFound.into_response(
             "reviews",
             "list-review-comments-on-a-pull-request",
         ));
-    });
+    };
 
     let comments = reviews::list_pr_comments(tx, pr_id, |c| {
         comment_to_response(&st.root, &owner, &name, c)
@@ -892,12 +901,12 @@ async fn create_review_comment(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(pr_id) = prs::find_id(&tx, &owner, &name, pr_number) else {
+    let Some(pr_id) = prs::find_id(&tx, &owner, &name, pr_number) else {
         return Err(Error::NotFound.into_response(
             "pulls",
             "update-a-review-comment-for-a-pull-request",
         ));
-    });
+    };
 
     let comments =
         reviews::add_pr_comments(&tx, pr_id, [req._comment.body].into_iter());
@@ -920,20 +929,20 @@ async fn get_review_comment(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(repo_id) = id_by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response(
-            "pulls",
-            "get-a-review-comment-for-a-pull-request",
-        ));
-    });
+    let Some(repo_id) = id_by_name(tx, &owner, &name) else {
+    return Err(Error::NotFound.into_response(
+        "pulls",
+        "get-a-review-comment-for-a-pull-request",
+    ));
+    };
 
-    guard!(let Some(comment) = reviews::comment_by_i64(tx, repo_id, comment_id)
+    let Some(comment) = reviews::comment_by_i64(tx, repo_id, comment_id)
             .map(|cid| reviews::get_comment(tx, cid)) else {
         return Err(Error::NotFound.into_response(
             "pulls",
             "get-a-review-comment-for-a-pull-request",
         ));
-    });
+    };
 
     Ok(Json(comment_to_response(&st.root, &owner, &name, comment)))
 }
@@ -946,18 +955,18 @@ async fn update_review_comment(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
+    let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response(
             "pulls",
             "create-a-review-comment-for-a-pull-request",
         ));
-    });
-    guard!(let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id) else {
+    };
+    let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id) else {
         return Err(Error::NotFound.into_response(
             "pulls",
             "create-a-review-comment-for-a-pull-request",
         ));
-    });
+    };
 
     reviews::update_comment(&tx, comment_id, &req.body);
 
@@ -975,18 +984,18 @@ async fn delete_review_comment(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
+    let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
         ));
-    });
-    guard!(let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id) else {
+    };
+    let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id) else {
         return Err(Error::NotFound.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
         ));
-    });
+    };
 
     if reviews::delete_comment(&tx, comment_id) {
         tx.commit();
@@ -1006,9 +1015,9 @@ async fn get_issue(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, number) else {
+    let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, number) else {
         return Err(Error::NotFound.into_response("issues", "get-an-issue"));
-    });
+    };
 
     let issue = prs::get_issue(tx, issue_id);
 
@@ -1042,13 +1051,13 @@ async fn create_issue(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::Unauthenticated("").into_response("issues", "create-an-issue"));
-    });
+    };
 
-    guard!(let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
+    let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("issues", "create-an-issue"));
-    });
+    };
 
     let issue_id = prs::issue_create(
         &tx,
@@ -1103,9 +1112,9 @@ async fn get_issue_labels(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, issue_number) else {
+    let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, issue_number) else {
         return Err(Error::NotFound.into_response("labels", "list-labels-for-an-issue"));
-    });
+    };
 
     let labels = prs::get_labels(tx, issue_id, |l| {
         label_to_label(&st.root, &owner, &name, l)
@@ -1125,9 +1134,9 @@ async fn replace_issue_labels(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
+    let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
         return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
-    });
+    };
 
     for label in prs::get_labels(&tx, issue, |l| l.id) {
         prs::remove_label(&tx, issue, label);
@@ -1157,9 +1166,9 @@ async fn add_issue_labels(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
+    let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
         return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
-    });
+    };
 
     for label in labels
         .labels
@@ -1185,9 +1194,9 @@ async fn delete_issue_label(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
+    let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
         return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
-    });
+    };
 
     if let Some(existing) = prs::get_labels(&tx, issue, |l| l)
         .into_iter()
@@ -1211,9 +1220,9 @@ async fn get_issue_comments(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
+    let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number) else {
         return Err(Error::NotFound.into_response("labels", "add-labels-to-an-issue"));
-    });
+    };
 
     let comments = prs::get_comments(&tx, issue, |c| {
         IssueComment {
@@ -1242,16 +1251,16 @@ async fn create_issue_comment(
     let mut db = Source::get();
     let tx = db.token_eager();
 
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::Unauthenticated("").into_response("issues", "create-an-issue-response"));
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("issues", "create-an-issue-comments"));
-    });
-    guard!(let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
-                                    .map(|id| prs::get_issue(&tx, id)) else {
+    };
+    let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
+            .map(|id| prs::get_issue(&tx, id)) else {
         return Err(Error::NotFound.into_response("issues", "create-an-issue-comments"));
-    });
+    };
 
     let comment_id = prs::create_comment(&tx, user.id, issue.id, &req.body);
     let comment = prs::get_comment(&tx, comment_id);
@@ -1314,12 +1323,12 @@ async fn get_issue_comment(
     let mut db = Source::get();
     let tx = &db.token();
 
-    guard!(let Some(repo_id) = id_by_name(tx, &owner, &name) else {
+    let Some(repo_id) = id_by_name(tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("issues", "get-an-issue-comment"));
-    });
-    guard!(let Some(comment) = prs::get_comment_by_i64(tx, repo_id, comment_id) else {
+    };
+    let Some(comment) = prs::get_comment_by_i64(tx, repo_id, comment_id) else {
         return Err(Error::NotFound.into_response("issues", "get-an-issue-comment"));
-    });
+    };
     let issue = prs::get_issue(tx, comment.issue);
 
     Ok(Json(
@@ -1347,15 +1356,15 @@ async fn update_issue_comment(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::Unauthenticated("").into_response("issues", "update-an-issue-comment"));
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("issues", "update-an-issue-comment"));
-    });
-    guard!(let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id) else {
+    };
+    let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id) else {
         return Err(Error::NotFound.into_response("issues", "update-an-issue-comment"));
-    });
+    };
 
     let issue = prs::get_issue(&tx, comment.issue);
     let author = comment
@@ -1413,15 +1422,15 @@ async fn delete_issue_comment(
     let mut db = Source::get();
     let tx = db.token();
 
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::Unauthenticated("").into_response("issues", "delete-an-issue-comment"));
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("issues", "delete-an-issue-comment"));
-    });
-    guard!(let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id) else {
+    };
+    let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id) else {
         return Err(Error::NotFound.into_response("issues", "delete-an-issue-comment"));
-    });
+    };
 
     let issue = prs::get_issue(&tx, comment.issue);
     let author = comment

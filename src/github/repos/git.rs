@@ -17,8 +17,6 @@ use std::io::Write;
 use std::sync::{RwLock, RwLockWriteGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use guard::guard;
-
 use crate::github::{Authorization, Error, GHError, St};
 use crate::model::prs::PullRequestId;
 use crate::model::repos::RepositoryId;
@@ -50,9 +48,9 @@ async fn create_blob(
 ) -> Result<(http::StatusCode, Json<CreateBlobResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "create-a-blob"));
-    });
+    };
 
     let oid = crate::model::git::store(
         &tx,
@@ -93,14 +91,14 @@ async fn get_blob(
 ) -> Result<Json<BlobResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "get-a-blob"));
-    });
+    };
 
-    guard!(let Some(object) = git_hash::ObjectId::from_hex(blob_id.as_bytes()).ok()
-    .and_then(|oid| crate::model::git::load(tx, repo.network, &oid)) else {
+    let Some(object) = git_hash::ObjectId::from_hex(blob_id.as_bytes()).ok()
+            .and_then(|oid| crate::model::git::load(tx, repo.network, &oid)) else {
         return Err(Error::NotFound.into_response("git", "get-a-blob"));
-    });
+    };
     let blob = object.into_blob();
     let url =
         format!("{}/repos/{}/{}/git/blobs/{}", st.root, owner, name, blob_id);
@@ -119,9 +117,9 @@ async fn get_tree(
 ) -> Result<Json<TreeResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "get-a-tree"));
-    });
+    };
 
     // todo: invalid oid? missing tree?
     let t = git_hash::ObjectId::from_hex(tree_id.as_bytes())
@@ -180,9 +178,9 @@ async fn create_tree(
 ) -> Result<(http::StatusCode, Json<TreeResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "create-a-tree"));
-    });
+    };
 
     // TODO: what if oid is not valid, or not in repo, or not a tree?
     let empty_tree = git_object::Tree::empty();
@@ -259,9 +257,9 @@ async fn get_commit(
 ) -> Result<Json<super::Commit>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "get-a-commit"));
-    });
+    };
 
     let oid =
         git_hash::ObjectId::from_hex(cid.as_bytes()).expect("invalid sha");
@@ -307,13 +305,13 @@ async fn create_commit(
     let mut db = Source::get();
     let tx = db.token_eager();
     // TODO: test error when trying to hit this endpoint unauth'd
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::NotFound.into_response("git", "create-a-commit"));
-    });
+    };
 
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "create-a-commit"));
-    });
+    };
 
     let default_signature = git_actor::Signature {
         name: user.login.as_ref().into(),
@@ -409,16 +407,16 @@ async fn create_ref(
         .into_response("git", "create-a-reference"));
     }
 
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "create-a-reference"));
-    });
+    };
 
     // FIXME: should fail for "empty repository" aka repo with no branches
     let oid = git_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
-    guard!(let Some(obj) = crate::model::git::load(&tx, repo.network, &oid) else {
+    let Some(obj) = crate::model::git::load(&tx, repo.network, &oid) else {
         return Err(Error::Unprocessable("Object does not exist", &[])
             .into_response("git", "create-a-reference"));
-    });
+    };
 
     if req.r#ref.starts_with("refs/heads/") && obj.kind() != Kind::Commit {
         return Err(Error::Unprocessable("Reference update failed", &[])
@@ -464,9 +462,9 @@ async fn list_refs(
     // TODO: ordering
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "get-a-reference"));
-    });
+    };
 
     let mut refs = Vec::new();
     crate::model::git::refs::list(tx, repo.id, |refname, oid| {
@@ -497,14 +495,14 @@ async fn get_ref(
 ) -> Result<Json<RefResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "get-a-reference"));
-    });
+    };
 
     let refname = format!("refs/{}", ref_.as_str());
-    guard!(let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &refname) else {
+    let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &refname) else {
         return Err(Error::NotFound.into_response("git", "get-a-reference"));
-    });
+    };
 
     let obj = crate::model::git::load(tx, repo.network, &oid)
         .expect("refs probably have to point to valid objects");
@@ -533,27 +531,27 @@ async fn update_ref(
 ) -> Result<Json<RefResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::Unauthenticated("").into_response("git", "update-a-reference"));
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "update-a-reference"));
-    });
+    };
 
     // FIXME: should fail for "empty repository" aka repo with no branches (and objects?)
     // FIXME: what if branch is protected
     let refname = format!("refs/{}", ref_.as_str());
     // drop it to avoid using it, should only be using the normalised refname
     drop(ref_);
-    guard!(let Some(current_oid) = crate::model::git::refs::resolve(&tx, repo.id, &refname) else {
+    let Some(current_oid) = crate::model::git::refs::resolve(&tx, repo.id, &refname) else {
         return Err(Error::Unprocessable("Reference does not exist", &[])
             .into_response("git", "update-a-reference"));
-    });
+    };
     let new_oid = git_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
-    guard!(let Some(new) = crate::model::git::load(&tx, repo.network, &new_oid) else {
+    let Some(new) = crate::model::git::load(&tx, repo.network, &new_oid) else {
         return Err(Error::Unprocessable("Object does not exist", &[])
             .into_response("git", "update-a-reference"));
-    });
+    };
 
     let mut forced = false;
     let new_kind = new.kind();
@@ -562,10 +560,10 @@ async fn update_ref(
         // TODO: check whether it's the object type or the ref path
         //       which triggers the check
         if refname.starts_with("refs/heads/") {
-            guard!(let Some(new) = new.as_commit() else {
+            let Some(new) = new.as_commit() else {
                 return Err(Error::Unprocessable("Object is not a commit", &[])
                     .into_response("git", "update-a-reference"));
-            });
+            };
             if !crate::model::git::log(&tx, repo.network, &new_oid)
                 .unwrap()
                 .any(|oid| oid == current_oid)
@@ -671,9 +669,9 @@ async fn delete_ref(
 ) -> Result<http::StatusCode, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    guard!(let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name) else {
+    let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "delete-a-reference"));
-    });
+    };
     // FIXME: what if a PR from this ref exists?
 
     let refname = format!("refs/{}", ref_.as_str());

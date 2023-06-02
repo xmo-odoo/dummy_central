@@ -7,9 +7,8 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{async_trait, Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
+use git_object::bstr::{BStr, BString};
 use git_object::Blob;
-use git_object::bstr::{BString, BStr};
-use guard::guard;
 use hmac::{Hmac, Mac};
 use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
 use hyper::StatusCode;
@@ -379,9 +378,14 @@ where
                 }
             })
             .map(|(a, b)| Authorization(a, b))
-            .ok_or_else(|| Error::Unauthenticated("You must be logged in to do that.")
-                .into_response_full("guides", "getting-started-with-the-rest-api", "authentication")
-            )
+            .ok_or_else(|| {
+                Error::Unauthenticated("You must be logged in to do that.")
+                    .into_response_full(
+                        "guides",
+                        "getting-started-with-the-rest-api",
+                        "authentication",
+                    )
+            })
     }
 }
 
@@ -529,10 +533,10 @@ async fn create_repository(
     } else {
         "create-an-organization-repository"
     };
-    guard!(let Some(u) = auth.and_then(|a| auth_to_user(&tx, a)) else {
+    let Some(u) = auth.and_then(|a| auth_to_user(&tx, a)) else {
         return Err(Error::Unauthenticated("Requires authentication")
             .into_response("repos", endpoint));
-    });
+    };
 
     // Repository name can only contain ASCII letters,
     // numbers, `-`, `_`, and `.`, get auto-fixed at creation.
@@ -547,20 +551,22 @@ async fn create_repository(
         return Err(NAME_TOO_LONG.into_response("repos", endpoint));
     }
 
-    guard!(let Some(owner) =
+    let Some(owner) =
         owner.is_empty().then(|| u.clone())
             .or_else(|| crate::model::users::get_user(&tx, owner)) else {
         return Err(Error::NotFound.into_response("repos", endpoint));
-    });
+    };
 
-    guard!(let Some(repo) = crate::model::repos::create_repository(&tx, u.id, owner.id, &name, None) else {
+    let Some(repo) = crate::model::repos::create_repository(&tx, u.id, owner.id, &name, None) else {
         return Err(REPO_CREATION_FAILED.into_response("repos", endpoint));
-    });
+    };
 
     info!("Created repository {}/{}", owner.login, name);
     if request.auto_init {
         let readme = crate::model::git::store(
-            &tx, repo.network, git_object::BlobRef::from_bytes(b"").unwrap()
+            &tx,
+            repo.network,
+            git_object::BlobRef::from_bytes(b"").unwrap(),
         );
         let mut t = git_object::TreeRef::empty();
         t.entries.push(git_object::tree::EntryRef {
@@ -580,17 +586,25 @@ async fn create_repository(
                 .into(),
             time: git_actor::Time::now_utc(),
         };
-        let c = crate::model::git::store(&tx, repo.network, git_object::CommitRef {
-            tree: BString::from(tree.to_hex().to_string()).as_ref(),
-            parents: Default::default(),
-            author: sig.clone(),
-            committer: sig,
-            encoding: None,
-            message: BStr::new(b"Initial commit"),
-            extra_headers: Vec::new(),
-        });
+        let c = crate::model::git::store(
+            &tx,
+            repo.network,
+            git_object::CommitRef {
+                tree: BString::from(tree.to_hex().to_string()).as_ref(),
+                parents: Default::default(),
+                author: sig.clone(),
+                committer: sig,
+                encoding: None,
+                message: BStr::new(b"Initial commit"),
+                extra_headers: Vec::new(),
+            },
+        );
         crate::model::git::refs::create(
-            &tx, repo.id, &format!("refs/heads/{}", repo.default_branch), &c);
+            &tx,
+            repo.id,
+            &format!("refs/heads/{}", repo.default_branch),
+            &c,
+        );
     }
     let r = Json(repo.to_response(&tx, &st.root)).into_response();
     tx.commit().unwrap();
@@ -704,14 +718,14 @@ async fn graphql(
 ) -> Json<GraphqlResponse> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    guard!(let Some(user) = auth_to_user(&tx, auth) else {
+    let Some(user) = auth_to_user(&tx, auth) else {
         return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message: "Unknown user".into()
             }]
         });
-    });
+    };
     // assume the query is either markPullRequestReadyForReview or
     // convertPullRequestToDraft and in both case the pullRequestId is provided
     // through the `pid` query variable
@@ -739,14 +753,14 @@ async fn graphql(
         serde_json::from_str(request.variables["pid"].as_str().unwrap())
             .unwrap();
 
-    guard!(let Some(pr) = crate::model::prs::find_by_id(&tx, pid.0) else {
+    let Some(pr) = crate::model::prs::find_by_id(&tx, pid.0) else {
         return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
                 message: "PR not found".into(),
             }]
         });
-    });
+    };
 
     if !crate::model::prs::can_write(&tx, user.id, pr.id) {
         return Json(GraphqlResponse {

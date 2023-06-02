@@ -25,7 +25,6 @@ git-object = "*"
 git-pack = "*"
 git-traverse = "*"
 github-types = { version = "*", path = "github-types" }
-guard = "*"
 headers = "*"
 hex = "*"
 hmac = "*"

@@ -4,8 +4,8 @@ use git_actor::Signature;
 use git_diff::tree::{recorder::Change, Changes, Recorder, State};
 use git_hash::{oid, ObjectId};
 use git_object::{
-    tree::Entry, Commit, CommitRef, Kind, Object, ObjectRef, TagRef, Tree,
-    TreeRefIter, bstr::BStr,
+    bstr::BStr, tree::Entry, Commit, CommitRef, Kind, Object, ObjectRef,
+    TagRef, Tree, TreeRefIter,
 };
 use rusqlite::{types::ValueRef, OptionalExtension};
 use sha1::{Digest, Sha1};
@@ -274,15 +274,16 @@ pub fn find_blob(
     mut entries: Vec<Entry>,
 ) -> Option<(ObjectId, git_object::Blob)> {
     'path: for p in path.split('/') {
-        let entry = std::mem::take(&mut entries).into_iter()
+        let entry = std::mem::take(&mut entries)
+            .into_iter()
             .find(|e| &e.filename == BStr::new(p.as_bytes()))?;
 
         match load(tx, network, &entry.oid)? {
             Object::Blob(b) => return Some((entry.oid, b)),
             Object::Tree(t) => {
                 entries = t.entries;
-            },
-            Object::Commit(_) | Object::Tag(_) => break ,
+            }
+            Object::Commit(_) | Object::Tag(_) => break,
         }
     }
     None

@@ -14,7 +14,6 @@ use git_pack::data::input::{
 use git_pack::data::output::bytes::FromEntriesIter;
 use git_pack::data::output::{Count, Entry as PackEntry};
 use git_pack::data::Version;
-use guard::guard;
 use headers::HeaderMap;
 use http::StatusCode;
 use std::collections::HashMap;
@@ -74,9 +73,9 @@ async fn git_refs(
     let mut db = Source::get();
     let tx = &db.token();
     let name = name.strip_suffix(".git").unwrap_or(&name);
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
         return http::StatusCode::NOT_FOUND.into_response();
-    });
+    };
 
     let mut capabilities = match service.as_str() {
         "git-upload-pack" => Some("multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed allow-tip-sha1-in-want allow-reachable-sha1-in-want no-done filter object-format=sha1"),
@@ -134,9 +133,9 @@ async fn git_upload_pack(
     let mut db = Source::get();
     let tx = &db.token();
     let name = name.strip_suffix(".git").unwrap_or(&name);
-    guard!(let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
+    let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
         return http::StatusCode::NOT_FOUND.into_response()
-    });
+    };
 
     // TODO: parse options
     // TODO: parse want/have, eventually we probably want to handle updates
@@ -203,17 +202,17 @@ async fn git_receive_pack(
     let mut db = Source::get();
     let tx = db.token_eager();
     let name = name.strip_suffix(".git").unwrap_or(&name);
-    guard!(let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return (
             http::StatusCode::UNAUTHORIZED,
             [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
             b"No anonymous write access.".as_slice(),
         ).into_response();
-    });
-    guard!(let Some(repo) = crate::model::repos::by_name(&tx, &owner, name) else {
+    };
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, name) else {
         // FIXME: how does that react?
         return http::StatusCode::NOT_FOUND.into_response();
-    });
+    };
 
     let mut len = [0u8; 4];
     let mut line_buf = Vec::new();
