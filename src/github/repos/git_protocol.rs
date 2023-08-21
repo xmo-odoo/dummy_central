@@ -77,18 +77,18 @@ async fn git_refs(
         return http::StatusCode::NOT_FOUND.into_response();
     };
 
+    // FIXME: private repos & auth for upload-pack (fetch) as well
     let mut capabilities = match service.as_str() {
         "git-upload-pack" => Some("multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed allow-tip-sha1-in-want allow-reachable-sha1-in-want no-done filter object-format=sha1"),
-        "git-receive-pack" => {
-            if auth.is_none() {
-                return (
-                    http::StatusCode::UNAUTHORIZED,
-                    [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
-                    b"No anonymous write access.".as_slice(),
-                ).into_response();
-            }
-            Some("no-thin delete-refs quiet side-band-64k ofs-delta")
-        },
+        "git-receive-pack" if auth.is_none() => {
+            return (
+                http::StatusCode::UNAUTHORIZED,
+                [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
+                b"No anonymous write access.".as_slice(),
+            ).into_response();
+        }
+        "git-receive-pack" => Some("no-thin delete-refs quiet side-band side-band-64k ofs-delta report-status"),
+        // fixme: check what the actual response is for unknown services
         _ => return http::StatusCode::NOT_FOUND.into_response(),
     };
 
