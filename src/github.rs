@@ -367,12 +367,18 @@ where
                     .strip_prefix("basic ")
                     .or_else(|| h.strip_prefix("Basic "))
                 {
-                    String::from_utf8(BASE64_STANDARD.decode(h).ok()?)
-                        .ok()?
-                        .split_once(':')
-                        .map(|(user, key)| {
-                            (Some(user.to_string()), key.to_string())
-                        })
+                    let v = String::from_utf8(BASE64_STANDARD.decode(h).ok()?).ok().filter(|v| !v.is_empty())?;
+                    v.split_once(':')
+                        .map_or_else(
+                            || (None, v.to_string()),
+                            |(user, key)| if key.is_empty() {
+                                // apparently `foo@bar.com` translates to
+                                // `basic foo:` rather than `basic foo`
+                                (None, user.to_string())
+                            } else {
+                                (Some(user.to_string()), key.to_string())
+                            }
+                        ).into()
                 } else {
                     None
                 }
