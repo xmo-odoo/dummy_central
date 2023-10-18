@@ -701,7 +701,7 @@ async fn create_review(
     Json(req): Json<CreateReviewRequest>,
 ) -> Result<(http::StatusCode, Json<ReviewResponse>), GHError<'static>> {
     let mut db = Source::get();
-    let tx = db.token();
+    let tx = db.token_eager();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::NotFound.into_response("reviews", "create-a-review-for-a-pull-request"));
