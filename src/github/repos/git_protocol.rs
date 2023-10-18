@@ -17,7 +17,8 @@ use git_pack::data::Version;
 use headers::HeaderMap;
 use http::StatusCode;
 use std::collections::HashMap;
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read, Write, BufRead};
+use std::ops::BitOr;
 use std::sync::RwLock;
 
 use crate::github::{Authorization, Error, St};
@@ -235,7 +236,6 @@ async fn git_receive_pack(
                     )
                 }),
         ) - 4;
-        line_buf.clear();
         line_buf.resize(len as _, 0);
 
         // pkt(command NUL cap_list)
@@ -258,112 +258,11 @@ async fn git_receive_pack(
         ref_updates.push((from, to, refname.to_string()));
     }
 
-    // PACK(data)
-    let mut entries = BytesToEntriesIter::new_from_header(
-        r,
-        Mode::Verify,
-        EntryDataMode::Keep,
-        git_hash::Kind::Sha1,
-    )
-    .unwrap();
-    let mut entries_offset_cache = HashMap::<_, ObjectId>::new();
-    let mut entry_buf = Vec::new();
-    let mut copy_spec_buf = [0u8; 7];
-    let mut parent_buf = Vec::new();
-    for entry in entries {
-        let entry = entry.expect("Could not decode entry");
-        entry_buf.clear();
-        let compressed = entry.compressed.unwrap();
-
-        let (kind, filled) = match entry.header {
-            git_pack::data::entry::Header::Commit => (Kind::Commit, false),
-            git_pack::data::entry::Header::Tree => (Kind::Tree, false),
-            git_pack::data::entry::Header::Blob => (Kind::Blob, false),
-            git_pack::data::entry::Header::Tag => (Kind::Tag, false),
-            git_pack::data::entry::Header::RefDelta { base_id } => todo!(),
-            git_pack::data::entry::Header::OfsDelta { base_distance } => {
-                let oid =
-                    entries_offset_cache[&(entry.pack_offset - base_distance)];
-                parent_buf.clear();
-                let (kind, parent_data) = crate::model::git::get_in(
-                    &tx,
-                    repo.network,
-                    &oid,
-                    &mut parent_buf,
-                )
-                .unwrap();
-                let mut inflater = ZlibDecoder::new(&compressed[..]);
-                // first I have the size of the base object and the size of the new object (?)
-                let (base_length, _) = leb64_from_read(&mut inflater).unwrap();
-                let (new_length, _) = leb64_from_read(&mut inflater).unwrap();
-
-                entry_buf.reserve(new_length as usize);
-
-                let mut command = [0; 1];
-                while let Ok(()) = inflater.read_exact(&mut command) {
-                    if command[0] & 0x80 == 0 {
-                        let bytes = command[0] & 0x7f;
-                        inflater
-                            .by_ref()
-                            .take(bytes as _)
-                            .read_to_end(&mut entry_buf)
-                            .unwrap();
-                    } else {
-                        let bytes = command[0].count_ones() - 1;
-                        let spec = &mut copy_spec_buf[..bytes as _];
-                        inflater.read_exact(spec).unwrap();
-                        let mut spec = spec.iter_mut();
-                        let offset = (command[0] & 0b1 != 0)
-                            .then(|| *spec.next().unwrap() as usize)
-                            .unwrap_or(0)
-                            | (command[0] & 0b10 != 0)
-                                .then(|| (*spec.next().unwrap() as usize) << 8)
-                                .unwrap_or(0)
-                            | (command[0] & 0b100 != 0)
-                                .then(|| (*spec.next().unwrap() as usize) << 16)
-                                .unwrap_or(0)
-                            | (command[0] & 0b1000 != 0)
-                                .then(|| (*spec.next().unwrap() as usize) << 24)
-                                .unwrap_or(0);
-                        let size = (command[0] & 0b1_0000 != 0)
-                            .then(|| *spec.next().unwrap() as usize)
-                            .unwrap_or(0)
-                            | (command[0] & 0b10_0000 != 0)
-                                .then(|| (*spec.next().unwrap() as usize) << 8)
-                                .unwrap_or(0)
-                            | (command[0] & 0b100_0000 != 0)
-                                .then(|| (*spec.next().unwrap() as usize) << 16)
-                                .unwrap_or(0);
-                        let size = if size == 0 { 0x10000 } else { size };
-
-                        entry_buf.extend(&parent_data[offset..offset + size]);
-                    }
-                }
-                (kind, true)
-            }
-        };
-        if !filled {
-            entry_buf.reserve(entry.decompressed_size as usize);
-            flate2::Decompress::new(true)
-                .decompress_vec(
-                    &compressed,
-                    &mut entry_buf,
-                    FlushDecompress::Finish,
-                )
-                .unwrap();
-        }
-
-        let oid = crate::model::git::store(
-            &tx,
-            repo.network,
-            ObjectRef::from_bytes(kind, &entry_buf).unwrap(),
-        );
-        entries_offset_cache.insert(entry.pack_offset, oid);
-    }
+    load_pack_data(&tx, &repo, r);
 
     // TODO: count entries with a from *and* a to in the first iteration instead?
     let mut updates = Vec::with_capacity(ref_updates.len());
-    for (from, to, refname) in ref_updates {
+    for (from, to, refname) in ref_updates.iter() {
         if from.is_null() {
             crate::model::git::refs::create(&tx, repo.id, &refname, &to);
         } else if to.is_null() {
@@ -371,6 +270,7 @@ async fn git_receive_pack(
             crate::model::git::refs::delete(&tx, repo.id, &refname, &from);
         } else {
             crate::model::git::refs::update(&tx, repo.id, &refname, &from, &to);
+            // FIXME: handling of non-head refs
             updates.push((
                 Box::<str>::from(refname.strip_prefix("refs/heads/").unwrap()),
                 to,
@@ -382,7 +282,7 @@ async fn git_receive_pack(
     for (branch, oid, forced) in updates.iter() {
         // Update PRs and send webhooks
         let branch: super::git::BranchRef = (repo.id, branch);
-        super::git::find_and_update_pr(&tx, &st, &user, *oid, branch, *forced);
+        super::git::find_and_update_pr(&tx, &st, &user, **oid, branch, *forced);
     }
     tx.commit().unwrap();
 
@@ -411,7 +311,9 @@ async fn git_receive_pack(
     // the first line is always the same and just tells the client that the pack
     // upload worked, "unpack [err]" says it failed and why
     let mut response = b"0013\x01000eunpack ok\n".to_vec();
-    for (branch, _, _) in updates {
+    for (_, _, branch) in ref_updates {
+        // FIXME: handling of non-head refs
+        let branch = branch.strip_prefix("refs/heads/").unwrap();
         let len_line = 4 + "ok refs/heads/".len() + branch.len() + 1;
         let len_pack = 4 + 1 + len_line;
         // clearer with an explicit newline as that's part of the payload length
@@ -432,4 +334,119 @@ async fn git_receive_pack(
         response,
     )
         .into_response()
+}
+
+fn load_pack_data(tx: &rusqlite::Transaction<'_>, repo: &crate::model::repos::Repository, mut r: BufReader<bytes::buf::Reader<bytes::Bytes>>) {
+    // fill_buf (of BufReader) only refills the buffer if it's *empty*
+    if r.fill_buf().unwrap().is_empty() {
+        return
+    }
+    // PACK(data)
+    let mut entries = BytesToEntriesIter::new_from_header(
+        r,
+        Mode::Verify,
+        EntryDataMode::Keep,
+        git_hash::Kind::Sha1,
+    ) .unwrap();
+    let mut entries_offset_cache = HashMap::<_, ObjectId>::new();
+    let mut entry_buf = Vec::new();
+    let mut copy_spec_buf = [0u8; 7];
+    let mut parent_buf = Vec::new();
+    for entry in entries {
+        let entry = entry.expect("Could not decode entry");
+        entry_buf.clear();
+        let compressed = entry.compressed.unwrap();
+
+        let (kind, filled) = match entry.header {
+            git_pack::data::entry::Header::Commit => (Kind::Commit, false),
+            git_pack::data::entry::Header::Tree => (Kind::Tree, false),
+            git_pack::data::entry::Header::Blob => (Kind::Blob, false),
+            git_pack::data::entry::Header::Tag => (Kind::Tag, false),
+            git_pack::data::entry::Header::RefDelta { base_id } => {
+                todo!("Implement unpacking of ref-delta entries");
+            }
+            git_pack::data::entry::Header::OfsDelta { base_distance } => {
+                let oid =
+                    entries_offset_cache[&(entry.pack_offset - base_distance)];
+                parent_buf.clear();
+                let (kind, parent_data) = crate::model::git::get_in(
+                    tx,
+                    repo.network,
+                    &oid,
+                    &mut parent_buf,
+                )
+                .unwrap();
+                let mut inflater = ZlibDecoder::new(&compressed[..]);
+                // first I have the size of the base object and the size of the new object (?)
+                let (base_length, _) = leb64_from_read(&mut inflater).unwrap();
+                let (new_length, _) = leb64_from_read(&mut inflater).unwrap();
+
+                entry_buf.reserve(new_length as usize);
+
+                let mut command = 0;
+                while let Ok(()) = inflater.read_exact(std::slice::from_mut(&mut command)) {
+                    if command & 0x80 == 0 {
+                        // add literal data
+                        let bytes = command & 0x7f;
+                        inflater
+                            .by_ref()
+                            .take(bytes as _)
+                            .read_to_end(&mut entry_buf)
+                            .unwrap();
+                    } else {
+                        // copy data from base object
+
+                        // the header is a sparse buffer of 0-7 bytes, with the
+                        // leading byte indicating which of the bytes are
+                        // nonzero
+
+                        // bitmap of relevant header bytes
+                        let bytes = command.count_ones() - 1;
+                        // spec is $bytes bytes, providing up to 4 bytes of
+                        // offset into the base and up to 3 bytes of length
+                        let spec = &mut copy_spec_buf[..bytes as _];
+                        inflater.read_exact(spec).unwrap();
+                        let mut spec = spec.iter();
+
+                        // the low 4 bits indicate which of the first 4 bytes
+                        // are present, and those are OR-ed to get the offset
+                        let offset = (0..4).filter(|idx| (command & (1<<idx)) != 0)
+                            .zip(spec.by_ref())
+                            .map(|(idx, byte)| (*byte as usize) << (8*idx))
+                            .fold(0, usize::bitor);
+
+                        // the high 3 bits indicate which of the next 3 bytes
+                        // are present and those are OR-ed to get the size
+                        let size = (0..3).filter(|idx| (command & (16 << idx)) != 0)
+                            .zip(spec)
+                            .map(|(idx, byte)| (*byte as usize) << (8*idx))
+                            .fold(0, usize::bitor);
+                        // TODO: is this a final size of 0 or a bitmap value of 0
+                        // TODO: why 0x10000?
+                        let size = if size == 0 { 0x10000 } else { size };
+
+                        entry_buf.extend(&parent_data[offset..offset + size]);
+                    }
+                }
+                (kind, true)
+            }
+        };
+        if !filled {
+            entry_buf.reserve(entry.decompressed_size as usize);
+            flate2::Decompress::new(true)
+                .decompress_vec(
+                    &compressed,
+                    &mut entry_buf,
+                    FlushDecompress::Finish,
+                )
+                .unwrap();
+        }
+
+        let oid = crate::model::git::store(
+            tx,
+            repo.network,
+            ObjectRef::from_bytes(kind, &entry_buf).unwrap(),
+        );
+        entries_offset_cache.insert(entry.pack_offset, oid);
+    }
 }
