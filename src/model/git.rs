@@ -117,8 +117,10 @@ pub mod refs {
     pub fn delete(tx: &Token, repo: RepositoryId, name: &str, oid: &oid) {
         assert_eq!(
             tx.execute("
-                    DELETE FROM refs INNER JOIN objects ON (objects.id = refs.object)
-                    WHERE refs.repository = ? AND refs.name = ? AND objects.sha = ?
+                    DELETE FROM refs
+                    WHERE repository = ?
+                      AND name = ?
+                      AND object = (SELECT id FROM objects WHERE sha = ?)
                 ", (*repo, name, oid.as_bytes())
             ).unwrap(),
             1
