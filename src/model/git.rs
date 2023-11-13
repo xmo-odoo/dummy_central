@@ -338,7 +338,7 @@ impl Iterator for Log<'_, '_> {
             if self.seen.insert(next) {
                 self.to_check.extend(
                     load(self.token, self.network, &next)
-                        .unwrap()
+                        .expect("log-linked objects to exist")
                         .into_commit()
                         .parents,
                 );

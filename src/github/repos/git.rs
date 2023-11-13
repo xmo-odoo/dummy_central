@@ -5,7 +5,7 @@ use base64::prelude::{Engine as _, BASE64_STANDARD};
 use flate2::write::ZlibEncoder;
 use git_object::bstr::{self, BString, ByteSlice};
 use git_object::tree::{Entry as TreeEntry, EntryMode};
-use git_object::{Data, Kind, ObjectRef};
+use git_object::{Data, Kind, ObjectRef, WriteTo as _};
 use git_pack::data::output::bytes::FromEntriesIter;
 use git_pack::data::output::{Count, Entry as PackEntry};
 use git_pack::data::Version;
@@ -149,7 +149,7 @@ async fn get_tree(
                     crate::model::git::load(tx, repo.network, &e.oid).unwrap();
                 TreeResponseEntry {
                     path: e.filename.to_string(),
-                    size: 0, // FIXME
+                    size: obj.size(),
                     mode: match e.mode {
                         EntryMode::Blob => "100644",
                         EntryMode::BlobExecutable => "100755",
@@ -326,29 +326,23 @@ async fn create_commit(
     // FIXME: {author: null} should be an error, but missing should fallback
     //        github is stupid
     // FIXME: mostly duplicate of the one in contents
-    let commit_oid = crate::model::git::store(
-        &tx,
-        repo.network,
-        git_object::Commit {
-            message: req.message.trim().into(),
-            // FIXME: validate tree, and parents
-            tree: git_hash::ObjectId::from_hex(req.tree.as_bytes()).unwrap(),
-            parents: req
-                .parents
-                .iter()
-                .map(|h| git_hash::ObjectId::from_hex(h.as_bytes()).unwrap())
-                .collect(),
-            author: req
-                .author
-                .map_or_else(|| default_signature.clone(), Into::into),
-            committer: req.committer.map_or(default_signature, Into::into),
-            encoding: None,
-            extra_headers: Vec::new(),
-        },
-    );
-    let commit = crate::model::git::load(&tx, repo.network, &commit_oid)
-        .map(|o| o.into_commit())
-        .unwrap();
+    let commit = git_object::Commit {
+        message: req.message.trim().into(),
+        // FIXME: validate tree, and parents
+        tree: git_hash::ObjectId::from_hex(req.tree.as_bytes()).unwrap(),
+        parents: req
+            .parents
+            .iter()
+            .map(|h| git_hash::ObjectId::from_hex(h.as_bytes()).unwrap())
+            .collect(),
+        author: req
+            .author
+            .map_or_else(|| default_signature.clone(), Into::into),
+        committer: req.committer.map_or(default_signature, Into::into),
+        encoding: None,
+        extra_headers: Vec::new(),
+    };
+    let commit_oid = crate::model::git::store(&tx, repo.network, &commit);
 
     tx.commit().unwrap();
 
@@ -565,7 +559,7 @@ async fn update_ref(
                     .into_response("git", "update-a-reference"));
             };
             if !crate::model::git::log(&tx, repo.network, &new_oid)
-                .unwrap()
+                .expect("new_oid should exist because we checked it at #545")
                 .any(|oid| oid == current_oid)
             {
                 if !req.force {
