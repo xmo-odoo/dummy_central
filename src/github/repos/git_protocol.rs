@@ -4,10 +4,11 @@ use axum::routing::{get, post};
 use axum::Router;
 use bytes::Buf;
 use flate2::read::ZlibDecoder;
-use flate2::FlushDecompress;
+use flate2::write::ZlibEncoder;
+use flate2::{Compression, FlushDecompress};
 use git_features::decode::leb64_from_read;
 use git_hash::ObjectId;
-use git_object::{Data, Kind, ObjectRef};
+use git_object::{Data, Kind, ObjectRef, WriteTo};
 use git_pack::data::input::{
     BytesToEntriesIter, EntryDataMode, LookupRefDeltaObjectsIter, Mode,
 };
@@ -17,7 +18,7 @@ use git_pack::data::Version;
 use headers::HeaderMap;
 use http::StatusCode;
 use std::collections::HashMap;
-use std::io::{BufReader, Read, Write, BufRead};
+use std::io::{BufRead, BufReader, Read, Write};
 use std::ops::BitOr;
 use std::sync::RwLock;
 
@@ -36,6 +37,49 @@ pub fn routes() -> Router<St> {
         .route("/info/refs", get(git_refs))
         .route("/git-upload-pack", post(git_upload_pack))
         .route("/git-receive-pack", post(git_receive_pack))
+        .route("/HEAD", get(get_head))
+        .route("/objects/:s/:ha", get(get_object))
+}
+
+async fn get_head(
+    _: Option<Authorization>,
+    State(_): State<St>,
+    Path((owner, name)): Path<(String, String)>,
+) -> Result<String, http::StatusCode> {
+    let mut db = Source::get();
+    let tx = &db.token();
+    let name = name.strip_suffix(".git").unwrap_or(&name);
+    crate::model::repos::by_name(tx, &owner, name)
+        .map(|repo| format!("ref: refs/heads/{}", repo.default_branch))
+        .ok_or(http::StatusCode::NOT_FOUND)
+}
+
+async fn get_object(
+    _: Option<Authorization>,
+    State(_): State<St>,
+    Path((owner, name, s, ha)): Path<(String, String, String, String)>,
+) -> Result<Vec<u8>, http::StatusCode> {
+    let mut db = Source::get();
+    let tx = &db.token();
+    let name = name.strip_suffix(".git").unwrap_or(&name);
+    let repo = crate::model::repos::by_name(tx, &owner, name)
+        .ok_or(http::StatusCode::NOT_FOUND)?;
+
+    let mut oid = ObjectId::null(git_hash::Kind::Sha1);
+    // FIXME: tracing
+    hex::decode_to_slice(s, &mut oid.as_mut_slice()[..1])
+        .and_then(|_| hex::decode_to_slice(ha, &mut oid.as_mut_slice()[1..]))
+        .or(Err(http::StatusCode::BAD_REQUEST))?;
+
+    let obj = crate::model::git::load(tx, repo.network, &oid)
+        .ok_or(http::StatusCode::NOT_FOUND)?;
+
+    let mut encoder = ZlibEncoder::new(Vec::new(), Compression::none());
+    encoder
+        .write(&obj.loose_header())
+        .and_then(|_| obj.write_to(&mut encoder))
+        .and_then(|_| encoder.finish())
+        .or(Err(http::StatusCode::BAD_REQUEST))
 }
 
 #[derive(serde::Deserialize)]
@@ -63,62 +107,79 @@ fn write_ref<W: std::io::Write>(
         caps,
     )
 }
+
 async fn git_refs(
     auth: Option<Authorization>,
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
     headers: HeaderMap,
-    Query(Service { service }): Query<Service>,
-) -> Response {
+    q: Option<Query<Service>>,
+) -> Result<
+    ([(&'static str, String);1], Vec<u8>),
+    Response,
+> {
     let protocol = headers.get("git-protocol");
     let mut db = Source::get();
     let tx = &db.token();
     let name = name.strip_suffix(".git").unwrap_or(&name);
-    let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
-        return http::StatusCode::NOT_FOUND.into_response();
-    };
+    let repo = crate::model::repos::by_name(tx, &owner, name)
+        .ok_or(http::StatusCode::NOT_FOUND.into_response())?;
 
+    let service = q
+        .map(|q| q.0)
+        .unwrap_or_else(|| Service {
+            service: String::from("git-upload-pack"),
+        })
+        .service;
     // FIXME: private repos & auth for upload-pack (fetch) as well
     let mut capabilities = match service.as_str() {
         "git-upload-pack" => Some("multi_ack thin-pack side-band side-band-64k ofs-delta shallow deepen-since deepen-not deepen-relative no-progress include-tag multi_ack_detailed allow-tip-sha1-in-want allow-reachable-sha1-in-want no-done filter object-format=sha1"),
         "git-receive-pack" if auth.is_none() => {
-            return (
+            return Err((
                 http::StatusCode::UNAUTHORIZED,
                 [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
                 b"No anonymous write access.".as_slice(),
-            ).into_response();
+            ).into_response());
         }
         "git-receive-pack" => Some("no-thin delete-refs quiet side-band side-band-64k ofs-delta report-status"),
         // fixme: check what the actual response is for unknown services
-        _ => return http::StatusCode::NOT_FOUND.into_response(),
+        _ => return Err(http::StatusCode::NOT_FOUND.into_response()),
     };
 
-    let service_len = "0000".len() + "# service=".len() + service.len() + 1;
-    let mut resp =
-        format!("{service_len:04x}# service={service}\n0000").into_bytes();
-    if protocol.and_then(|h| h.to_str().ok()) == Some("version=1") {
-        resp.extend(b"000eversion 1\n")
-    }
+    if service == "git-upload-pack" {
+        let mut resp = Vec::new();
+        crate::model::git::refs::list(tx, repo.id, |refname, oid| {
+            write!(&mut resp, "{}\t{}\n", oid, refname).unwrap();
+        });
+        Ok(([("Content-Type", "text/plain;charset=utf-8".into())], resp))
+    } else {
+        let service_len = "0000".len() + "# service=".len() + service.len() + 1;
+        let mut resp =
+            format!("{service_len:04x}# service={service}\n0000").into_bytes();
+        if protocol.and_then(|h| h.to_str().ok()) == Some("version=1") {
+            resp.extend(b"000eversion 1\n")
+        }
+        let default = format!("refs/heads/{}", repo.default_branch);
+        if let Some(oid) =
+            crate::model::git::refs::resolve(tx, repo.id, &default)
+        {
+            write_ref(&mut resp, "HEAD", &oid, capabilities.take()).unwrap();
+        }
+        crate::model::git::refs::list(tx, repo.id, |refname, oid| {
+            write_ref(&mut resp, refname, oid, capabilities.take()).unwrap();
+        });
+        // TODO: can apparently also send a bunch of `.have` pseudo-refs for
+        //       detached heads
+        resp.extend(b"0000");
 
-    let default = format!("refs/heads/{}", repo.default_branch);
-    if let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &default) {
-        write_ref(&mut resp, "HEAD", &oid, capabilities.take()).unwrap();
+        Ok((
+            [(
+                "Content-Type",
+                format!("application/x-{service}-advertisement"),
+            )],
+            resp,
+        ))
     }
-    crate::model::git::refs::list(tx, repo.id, |refname, oid| {
-        write_ref(&mut resp, refname, oid, capabilities.take()).unwrap();
-    });
-    // TODO: can apparently also send a bunch of `.have` pseudo-refs for
-    //       detached heads
-    resp.extend(b"0000");
-
-    (
-        [(
-            "Content-Type",
-            format!("application/x-{service}-advertisement"),
-        )],
-        resp,
-    )
-        .into_response()
 }
 
 #[repr(u8)]
@@ -135,7 +196,7 @@ async fn git_upload_pack(
     let tx = &db.token();
     let name = name.strip_suffix(".git").unwrap_or(&name);
     let Some(repo) = crate::model::repos::by_name(tx, &owner, name) else {
-        return http::StatusCode::NOT_FOUND.into_response()
+        return http::StatusCode::NOT_FOUND.into_response();
     };
 
     // TODO: parse options
@@ -208,7 +269,8 @@ async fn git_receive_pack(
             http::StatusCode::UNAUTHORIZED,
             [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
             b"No anonymous write access.".as_slice(),
-        ).into_response();
+        )
+            .into_response();
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, name) else {
         // FIXME: how does that react?
@@ -336,10 +398,14 @@ async fn git_receive_pack(
         .into_response()
 }
 
-fn load_pack_data(tx: &rusqlite::Transaction<'_>, repo: &crate::model::repos::Repository, mut r: BufReader<bytes::buf::Reader<bytes::Bytes>>) {
+fn load_pack_data(
+    tx: &rusqlite::Transaction<'_>,
+    repo: &crate::model::repos::Repository,
+    mut r: BufReader<bytes::buf::Reader<bytes::Bytes>>,
+) {
     // fill_buf (of BufReader) only refills the buffer if it's *empty*
     if r.fill_buf().unwrap().is_empty() {
-        return
+        return;
     }
     // PACK(data)
     let mut entries = BytesToEntriesIter::new_from_header(
@@ -347,7 +413,8 @@ fn load_pack_data(tx: &rusqlite::Transaction<'_>, repo: &crate::model::repos::Re
         Mode::Verify,
         EntryDataMode::Keep,
         git_hash::Kind::Sha1,
-    ) .unwrap();
+    )
+    .unwrap();
     let mut entries_offset_cache = HashMap::<_, ObjectId>::new();
     let mut entry_buf = Vec::new();
     let mut copy_spec_buf = [0u8; 7];
@@ -384,7 +451,9 @@ fn load_pack_data(tx: &rusqlite::Transaction<'_>, repo: &crate::model::repos::Re
                 entry_buf.reserve(new_length as usize);
 
                 let mut command = 0;
-                while let Ok(()) = inflater.read_exact(std::slice::from_mut(&mut command)) {
+                while let Ok(()) =
+                    inflater.read_exact(std::slice::from_mut(&mut command))
+                {
                     if command & 0x80 == 0 {
                         // add literal data
                         let bytes = command & 0x7f;
@@ -410,16 +479,18 @@ fn load_pack_data(tx: &rusqlite::Transaction<'_>, repo: &crate::model::repos::Re
 
                         // the low 4 bits indicate which of the first 4 bytes
                         // are present, and those are OR-ed to get the offset
-                        let offset = (0..4).filter(|idx| (command & (1<<idx)) != 0)
+                        let offset = (0..4)
+                            .filter(|idx| (command & (1 << idx)) != 0)
                             .zip(spec.by_ref())
-                            .map(|(idx, byte)| (*byte as usize) << (8*idx))
+                            .map(|(idx, byte)| (*byte as usize) << (8 * idx))
                             .fold(0, usize::bitor);
 
                         // the high 3 bits indicate which of the next 3 bytes
                         // are present and those are OR-ed to get the size
-                        let size = (0..3).filter(|idx| (command & (16 << idx)) != 0)
+                        let size = (0..3)
+                            .filter(|idx| (command & (16 << idx)) != 0)
                             .zip(spec)
-                            .map(|(idx, byte)| (*byte as usize) << (8*idx))
+                            .map(|(idx, byte)| (*byte as usize) << (8 * idx))
                             .fold(0, usize::bitor);
                         // TODO: is this a final size of 0 or a bitmap value of 0
                         // TODO: why 0x10000?

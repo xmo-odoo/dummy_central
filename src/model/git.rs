@@ -48,6 +48,7 @@ pub mod refs {
             SELECT name, sha FROM refs
             LEFT JOIN objects ON (id = object)
             WHERE repository = ?
+            ORDER BY name
         ",
         )
         .unwrap()
