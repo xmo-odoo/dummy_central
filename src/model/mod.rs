@@ -1,3 +1,4 @@
+use github_types::repos::StatusState;
 use once_cell::sync::Lazy;
 use rusqlite::{OpenFlags as of, Transaction};
 use std::{
@@ -69,7 +70,7 @@ impl Deref for StatusId {
 pub fn create_status(
     tx: &Token,
     commit: git::ObjectDbId,
-    state: &str, // fixme: enum?
+    state: StatusState,
     context: &str,
     target_url: Option<&str>,
     description: Option<&str>,
@@ -78,7 +79,7 @@ pub fn create_status(
         "INSERT OR REPLACE INTO statuses (object, state, context, target_url, description)
          VALUES (?, ?, ?, ?, ?)
          RETURNING id",
-        (*commit, state, context, target_url, description),
+        (*commit, <&str>::from(state), context, target_url, description),
         |row| row.get(0).map(StatusId),
     )
     .expect("insertion failed")

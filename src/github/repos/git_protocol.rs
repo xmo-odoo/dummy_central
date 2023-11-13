@@ -86,6 +86,8 @@ async fn get_object(
 struct Service {
     service: String,
 }
+
+#[allow(clippy::write_with_newline)]
 fn write_ref<W: std::io::Write>(
     mut buf: W,
     refname: &str,
@@ -96,7 +98,6 @@ fn write_ref<W: std::io::Write>(
         capabilities.map_or((0, "", ""), |c| (c.len() + 1, "\0", c));
 
     // we want the newline in the format string for clarity
-    #[allow(clippy::write_with_newline)]
     write!(
         buf,
         "{:04x}{} {}{}{}\n",
@@ -114,10 +115,7 @@ async fn git_refs(
     Path((owner, name)): Path<(String, String)>,
     headers: HeaderMap,
     q: Option<Query<Service>>,
-) -> Result<
-    ([(&'static str, String);1], Vec<u8>),
-    Response,
-> {
+) -> Result<([(&'static str, String); 1], Vec<u8>), Response> {
     let protocol = headers.get("git-protocol");
     let mut db = Source::get();
     let tx = &db.token();
@@ -149,6 +147,7 @@ async fn git_refs(
     if service == "git-upload-pack" {
         let mut resp = Vec::new();
         crate::model::git::refs::list(tx, repo.id, |refname, oid| {
+            #[allow(clippy::write_with_newline)]
             write!(&mut resp, "{}\t{}\n", oid, refname).unwrap();
         });
         Ok(([("Content-Type", "text/plain;charset=utf-8".into())], resp))
@@ -326,12 +325,12 @@ async fn git_receive_pack(
     let mut updates = Vec::with_capacity(ref_updates.len());
     for (from, to, refname) in ref_updates.iter() {
         if from.is_null() {
-            crate::model::git::refs::create(&tx, repo.id, &refname, &to);
+            crate::model::git::refs::create(&tx, repo.id, refname, to);
         } else if to.is_null() {
             // The pack-file MUST NOT be sent if the only command used is delete.
-            crate::model::git::refs::delete(&tx, repo.id, &refname, &from);
+            crate::model::git::refs::delete(&tx, repo.id, refname, from);
         } else {
-            crate::model::git::refs::update(&tx, repo.id, &refname, &from, &to);
+            crate::model::git::refs::update(&tx, repo.id, refname, from, to);
             // FIXME: handling of non-head refs
             updates.push((
                 Box::<str>::from(refname.strip_prefix("refs/heads/").unwrap()),

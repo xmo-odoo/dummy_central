@@ -361,24 +361,29 @@ where
             .and_then(|mut h| {
                 let h = h.to_str().ok()?;
                 // auth-scheme SP data
-                if h.starts_with("token ") {
-                    Some((None, h[6..].to_string()))
+                if let Some(h) = h.strip_prefix("token ") {
+                    Some((None, h.to_string()))
                 } else if let Some(h) = h
                     .strip_prefix("basic ")
                     .or_else(|| h.strip_prefix("Basic "))
                 {
-                    let v = String::from_utf8(BASE64_STANDARD.decode(h).ok()?).ok().filter(|v| !v.is_empty())?;
+                    let v = String::from_utf8(BASE64_STANDARD.decode(h).ok()?)
+                        .ok()
+                        .filter(|v| !v.is_empty())?;
                     v.split_once(':')
                         .map_or_else(
                             || (None, v.to_string()),
-                            |(user, key)| if key.is_empty() {
-                                // apparently `foo@bar.com` translates to
-                                // `basic foo:` rather than `basic foo`
-                                (None, user.to_string())
-                            } else {
-                                (Some(user.to_string()), key.to_string())
-                            }
-                        ).into()
+                            |(user, key)| {
+                                if key.is_empty() {
+                                    // apparently `foo@bar.com` translates to
+                                    // `basic foo:` rather than `basic foo`
+                                    (None, user.to_string())
+                                } else {
+                                    (Some(user.to_string()), key.to_string())
+                                }
+                            },
+                        )
+                        .into()
                 } else {
                     None
                 }
@@ -557,13 +562,17 @@ async fn create_repository(
         return Err(NAME_TOO_LONG.into_response("repos", endpoint));
     }
 
-    let Some(owner) =
-        owner.is_empty().then(|| u.clone())
-            .or_else(|| crate::model::users::get_user(&tx, owner)) else {
+    let Some(owner) = owner
+        .is_empty()
+        .then(|| u.clone())
+        .or_else(|| crate::model::users::get_user(&tx, owner))
+    else {
         return Err(Error::NotFound.into_response("repos", endpoint));
     };
 
-    let Some(repo) = crate::model::repos::create_repository(&tx, u.id, owner.id, &name, None) else {
+    let Some(repo) = crate::model::repos::create_repository(
+        &tx, u.id, owner.id, &name, None,
+    ) else {
         return Err(REPO_CREATION_FAILED.into_response("repos", endpoint));
     };
 
@@ -598,7 +607,7 @@ async fn create_repository(
             git_object::CommitRef {
                 tree: BString::from(tree.to_hex().to_string()).as_ref(),
                 parents: Default::default(),
-                author: sig.clone(),
+                author: sig,
                 committer: sig,
                 encoding: None,
                 message: BStr::new(b"Initial commit"),
@@ -728,8 +737,8 @@ async fn graphql(
         return Json(GraphqlResponse {
             data: None,
             errors: vec![GraphqlError {
-                message: "Unknown user".into()
-            }]
+                message: "Unknown user".into(),
+            }],
         });
     };
     // assume the query is either markPullRequestReadyForReview or
@@ -764,7 +773,7 @@ async fn graphql(
             data: None,
             errors: vec![GraphqlError {
                 message: "PR not found".into(),
-            }]
+            }],
         });
     };
 

@@ -495,6 +495,7 @@ impl std::convert::TryFrom<String> for StatusState {
 pub struct CreateStatusResponse {
     // url: String,
     // avatar_url: Option<String>
+    // FIXME: StatusId?
     pub id: i64,
     // node_id: String,
     pub state: StatusState,

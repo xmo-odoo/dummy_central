@@ -117,13 +117,16 @@ pub mod refs {
     }
     pub fn delete(tx: &Token, repo: RepositoryId, name: &str, oid: &oid) {
         assert_eq!(
-            tx.execute("
+            tx.execute(
+                "
                     DELETE FROM refs
                     WHERE repository = ?
                       AND name = ?
                       AND object = (SELECT id FROM objects WHERE sha = ?)
-                ", (*repo, name, oid.as_bytes())
-            ).unwrap(),
+                ",
+                (*repo, name, oid.as_bytes())
+            )
+            .unwrap(),
             1
         )
     }
@@ -279,13 +282,11 @@ pub fn find_blob(
     'path: for p in path.split('/') {
         let entry = std::mem::take(&mut entries)
             .into_iter()
-            .find(|e| &e.filename == BStr::new(p.as_bytes()))?;
+            .find(|e| e.filename == BStr::new(p.as_bytes()))?;
 
-        match load(tx, network, &entry.oid)? {
+        entries = match load(tx, network, &entry.oid)? {
+            Object::Tree(t) => t.entries,
             Object::Blob(b) => return Some((entry.oid, b)),
-            Object::Tree(t) => {
-                entries = t.entries;
-            }
             Object::Commit(_) | Object::Tag(_) => break,
         }
     }

@@ -95,8 +95,10 @@ async fn get_blob(
         return Err(Error::NotFound.into_response("git", "get-a-blob"));
     };
 
-    let Some(object) = git_hash::ObjectId::from_hex(blob_id.as_bytes()).ok()
-            .and_then(|oid| crate::model::git::load(tx, repo.network, &oid)) else {
+    let Some(object) = git_hash::ObjectId::from_hex(blob_id.as_bytes())
+        .ok()
+        .and_then(|oid| crate::model::git::load(tx, repo.network, &oid))
+    else {
         return Err(Error::NotFound.into_response("git", "get-a-blob"));
     };
     let blob = object.into_blob();
@@ -494,7 +496,8 @@ async fn get_ref(
     };
 
     let refname = format!("refs/{}", ref_.as_str());
-    let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &refname) else {
+    let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &refname)
+    else {
         return Err(Error::NotFound.into_response("git", "get-a-reference"));
     };
 
@@ -526,7 +529,8 @@ async fn update_ref(
     let mut db = Source::get();
     let tx = db.token_eager();
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response("git", "update-a-reference"));
+        return Err(Error::Unauthenticated("")
+            .into_response("git", "update-a-reference"));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NotFound.into_response("git", "update-a-reference"));
@@ -537,7 +541,9 @@ async fn update_ref(
     let refname = format!("refs/{}", ref_.as_str());
     // drop it to avoid using it, should only be using the normalised refname
     drop(ref_);
-    let Some(current_oid) = crate::model::git::refs::resolve(&tx, repo.id, &refname) else {
+    let Some(current_oid) =
+        crate::model::git::refs::resolve(&tx, repo.id, &refname)
+    else {
         return Err(Error::Unprocessable("Reference does not exist", &[])
             .into_response("git", "update-a-reference"));
     };
@@ -555,8 +561,11 @@ async fn update_ref(
         //       which triggers the check
         if refname.starts_with("refs/heads/") {
             let Some(new) = new.as_commit() else {
-                return Err(Error::Unprocessable("Object is not a commit", &[])
-                    .into_response("git", "update-a-reference"));
+                return Err(Error::Unprocessable(
+                    "Object is not a commit",
+                    &[],
+                )
+                .into_response("git", "update-a-reference"));
             };
             if !crate::model::git::log(&tx, repo.network, &new_oid)
                 .expect("new_oid should exist because we checked it at #545")
@@ -663,7 +672,8 @@ async fn delete_ref(
 ) -> Result<http::StatusCode, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name) else {
+    let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name)
+    else {
         return Err(Error::NotFound.into_response("git", "delete-a-reference"));
     };
     // FIXME: what if a PR from this ref exists?

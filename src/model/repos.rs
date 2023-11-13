@@ -388,8 +388,8 @@ pub fn get_statuses(
         Ok(CreateStatusResponse {
             id: row.get("id")?,
             context: row.get("context")?,
-            // TODO: handle this conversion failing as well
-            state: row.get_ref("state")?.as_str()?.try_into().unwrap(),
+            state: row.get_ref("state")?.as_str()?.try_into()
+                .expect("status state should be constrained in the database"),
             target_url: row.get("target_url")?,
             description: row.get("description")?,
             creator: None,
