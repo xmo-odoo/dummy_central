@@ -43,7 +43,7 @@ impl From<Authorship> for git_actor::Signature {
 }
 impl From<git_actor::SignatureRef<'_>> for Authorship {
     fn from(s: git_actor::SignatureRef<'_>) -> Self {
-        let dt = DateTime::<FixedOffset>::from_utc(
+        let dt = DateTime::<FixedOffset>::from_naive_utc_and_offset(
             NaiveDateTime::from_timestamp_opt(
                 s.time.seconds_since_unix_epoch as _,
                 0,
