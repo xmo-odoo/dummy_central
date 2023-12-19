@@ -103,7 +103,7 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
                     sha: commit.tree().to_hex().to_string(),
                     url: None,
                 },
-                message: commit.message.to_string(),
+                message: String::from_utf8_lossy(commit.message.trim()).to_string(),
                 author: Some(commit.author.into()),
                 committer: Some(commit.committer.into()),
                 comments_count: 0,
@@ -910,7 +910,7 @@ async fn create_or_update_contents(
         Json(FileCommit {
             content: Content {
                 // `name` is the last segment of `path`...
-                name: path.rsplit('/').next().unwrap().to_string(),
+                name: path.rsplit_once('/').unwrap().1.to_string(),
                 path: path.to_owned(),
                 sha: file_oid.to_hex().to_string(),
                 size: data_size,
@@ -923,7 +923,7 @@ async fn create_or_update_contents(
             commit: Commit {
                 sha: commit_oid.to_hex().to_string(),
                 node_id: None,
-                message: commit.message.to_string(),
+                message: String::from_utf8_lossy(commit.message.trim()).to_string(),
                 tree: Tree {
                     sha: oid.to_hex().to_string(),
                     url: None,

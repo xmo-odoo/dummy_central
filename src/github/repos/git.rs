@@ -272,7 +272,7 @@ async fn get_commit(
     Ok(Json(super::Commit {
         sha: cid,
         node_id: None,
-        message: commit.message.to_str_lossy().into_owned(),
+        message: String::from_utf8_lossy(commit.message.trim()).to_string(),
         tree: super::Tree {
             sha: commit.tree.to_hex().to_string(),
             url: None,
@@ -353,7 +353,7 @@ async fn create_commit(
         Json(super::Commit {
             sha: commit_oid.to_hex().to_string(),
             node_id: None,
-            message: commit.message.to_string(),
+            message: String::from_utf8_lossy(commit.message.trim()).to_string(),
             tree: super::Tree {
                 sha: commit.tree.to_hex().to_string(),
                 url: None,
