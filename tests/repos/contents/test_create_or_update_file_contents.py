@@ -29,5 +29,5 @@ class TestNonEmptyRepository:
         assert ghe.value.status == 404
         assert ghe.value.data == {
             "message": "Branch bob not found",
-            "documentation_url": "https://docs.github.com/rest/reference/repos#create-or-update-file-contents"
+            "documentation_url": "https://docs.github.com/rest/repos/repos#create-or-update-file-contents"
         }

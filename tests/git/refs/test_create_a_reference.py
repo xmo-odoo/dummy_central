@@ -10,7 +10,7 @@ def test_invalid_refs(repo):
     assert ghe.value.status == 422
     assert ghe.value.data  == {
         'message': 'Object does not exist',
-        'documentation_url': 'https://docs.github.com/rest/reference/git#create-a-reference'
+        'documentation_url': 'https://docs.github.com/rest/git/refs#create-a-reference'
     }
 
     b = repo.create_git_blob("test", "utf-8")
@@ -19,21 +19,21 @@ def test_invalid_refs(repo):
     assert ghe.value.status == 422, "refs/heads are branches and can only point towards commits"
     assert ghe.value.data == {
         "message": "Reference update failed",
-        "documentation_url": "https://docs.github.com/rest/reference/git#create-a-reference"
+        "documentation_url": "https://docs.github.com/rest/git/refs#create-a-reference"
     }
 
     with pytest.raises(GithubException) as ghe:
         repo.create_git_ref('refs/nonsense', b.sha)
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/git#create-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#create-a-reference',
         'message': "Reference name must contain at least three slash-separated components."
     }
     with pytest.raises(GithubException) as ghe:
         repo.create_git_ref('others/nonsense', b.sha)
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/git#create-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#create-a-reference',
         'message': "Reference name must start with 'refs/'."
     }
 
@@ -45,7 +45,7 @@ def test_invalid_refs(repo):
         repo.create_git_ref('refs/others/nonsense', b.sha)
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/git#create-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#create-a-reference',
         'message': 'Reference already exists'
     }
 
@@ -64,6 +64,6 @@ def test_invalid_refs(repo):
         ref.delete()
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/git#delete-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#delete-a-reference',
          'message': 'Reference does not exist'
     }

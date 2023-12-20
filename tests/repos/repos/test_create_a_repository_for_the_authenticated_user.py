@@ -11,7 +11,7 @@ def test_create_no_user(pytestconfig, request):
               .create_repo(__name__))
     assert ghe.value.status == 401
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/repos#create-a-repository-for-the-authenticated-user',
+        'documentation_url': 'https://docs.github.com/rest/repos/repos#create-a-repository-for-the-authenticated-user',
         'message': 'Requires authentication'
     }
 
@@ -28,7 +28,7 @@ def test_create_no_org(pytestconfig, request, github):
 
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/repos#create-an-organization-repository',
+        'documentation_url': 'https://docs.github.com/rest/repos/repos#create-an-organization-repository',
         'message': 'Not Found'
     }
 
@@ -48,7 +48,7 @@ def test_create_invalid_characters(request, user, org):
         user.get_repo('abc;def*_ghi')
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/repos#get-a-repository',
+        'documentation_url': 'https://docs.github.com/rest/repos/repos#get-a-repository',
         'message': 'Not Found'
     }
 
@@ -74,7 +74,7 @@ def test_create_too_long(request, user, org):
 
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/repos#create-a-repository-for-the-authenticated-user',
+        'documentation_url': 'https://docs.github.com/rest/repos/repos#create-a-repository-for-the-authenticated-user',
         'message': "Repository creation failed.",
         'errors': [{
             'code': 'custom',
@@ -89,7 +89,7 @@ def test_create_too_long(request, user, org):
 
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/repos#create-an-organization-repository',
+        'documentation_url': 'https://docs.github.com/rest/repos/repos#create-an-organization-repository',
         'message': "Repository creation failed.",
         'errors': [{
             'code': 'custom',
@@ -113,7 +113,7 @@ def test_duplicate(request, user):
             "field": "name",
             "message": "name already exists on this account"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/repos#create-a-repository-for-the-authenticated-user"
+        "documentation_url": "https://docs.github.com/rest/repos/repos#create-a-repository-for-the-authenticated-user"
     }
 
 def test_duplicate_org(request, org):
@@ -130,5 +130,5 @@ def test_duplicate_org(request, org):
             "field": "name",
             "message": "name already exists on this account"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/repos#create-an-organization-repository"
+        "documentation_url": "https://docs.github.com/rest/repos/repos#create-an-organization-repository"
     }

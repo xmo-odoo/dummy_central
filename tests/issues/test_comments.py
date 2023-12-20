@@ -31,7 +31,7 @@ def test_issue_comments(repo, pr, endpoint, request):
         pr.get_issue_comment(21345)
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/issues#get-an-issue-comment',
+        'documentation_url': 'https://docs.github.com/rest/issues/comments#get-an-issue-comment',
         'message': 'Not Found',
     }
 
@@ -59,14 +59,14 @@ def test_issue_comments(repo, pr, endpoint, request):
         c.edit("whoopsie")
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/issues#update-an-issue-comment',
+        'documentation_url': 'https://docs.github.com/rest/issues/comments#update-an-issue-comment',
         'message': 'Not Found',
     }
     with pytest.raises(GithubException) as ghe:
         c.delete()
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/issues#delete-an-issue-comment',
+        'documentation_url': 'https://docs.github.com/rest/issues/comments#delete-an-issue-comment',
         'message': 'Not Found',
     }
 

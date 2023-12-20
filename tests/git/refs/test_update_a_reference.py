@@ -30,7 +30,7 @@ def test_update_ref(request, repo, user):
     assert ghe.value.status == 422
     assert ghe.value.data == {
         'message': 'Object is not a commit',
-        'documentation_url': 'https://docs.github.com/rest/reference/git#update-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#update-a-reference',
     }
 
     with pytest.raises(GithubException) as ghe:
@@ -38,7 +38,7 @@ def test_update_ref(request, repo, user):
     assert ghe.value.status == 422
     assert ghe.value.data == {
         'message': 'Object does not exist',
-        'documentation_url': 'https://docs.github.com/rest/reference/git#update-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#update-a-reference',
     }
 
     descendant = repo.create_git_commit(
@@ -61,7 +61,7 @@ def test_update_ref(request, repo, user):
         ref.edit(sibling.sha)
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/git#update-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#update-a-reference',
         'message': 'Update is not a fast forward'
     }
     ref.edit(sibling.sha, force=True)
@@ -78,7 +78,7 @@ def test_update_ref(request, repo, user):
     assert ghe.value.status == 422
     assert ghe.value.data == {
         'message': 'Reference does not exist',
-        'documentation_url': 'https://docs.github.com/rest/reference/git#update-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#update-a-reference',
     }
 
     with pytest.raises(GithubException) as ghe:
@@ -86,7 +86,7 @@ def test_update_ref(request, repo, user):
     assert ghe.value.status == 422
     assert ghe.value.data == {
         'message': 'Reference does not exist',
-        'documentation_url': 'https://docs.github.com/rest/reference/git#delete-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#delete-a-reference',
     }
 
     # TODO: what happens if we update a non-heads commit ref to a non-descendant?

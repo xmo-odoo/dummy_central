@@ -247,16 +247,7 @@ impl<'e> Error<'e> {
             value: None,
         }
     }
-    /// Convenience method for generating github error JSON.
-    ///
-    /// Takes the name of a section of the Github v3 docs
-    /// (e.g. `"issues"`, `"repos"`) and the name of the specific item
-    /// (anchor) within that page, prepends with the rest of the URL
-    /// up to and including `"reference/"`.
-    fn into_response(self, section: &'e str, item: &'e str) -> GHError<'e> {
-        self.into_response_full("reference", section, item)
-    }
-    fn into_response_full(
+    fn into_response(
         self,
         category: &'e str,
         section: &'e str,
@@ -390,7 +381,7 @@ where
             .map(|(a, b)| Authorization(a, b))
             .ok_or_else(|| {
                 Error::Unauthenticated("You must be logged in to do that.")
-                    .into_response_full(
+                    .into_response(
                         "guides",
                         "getting-started-with-the-rest-api",
                         "authentication",
@@ -412,7 +403,7 @@ pub fn routes(st: Config) -> Router {
         .route("/rate_limit", get(rate_limit))
         .route("/graphql", post(graphql))
         .merge(repos::routes())
-        .fallback(|| async { Error::NOT_FOUND.into_response("", "") })
+        .fallback(|| async { Error::NOT_FOUND.into_response("reference", "", "") })
         .with_state(Arc::new(st))
 }
 
@@ -427,7 +418,7 @@ async fn get_current_user(
     auth_to_user(tx, auth)
         .ok_or_else(|| {
             Error::Unauthenticated("Requires authentication")
-                .into_response("users", "get-the-authenticated-user")
+                .into_response("users", "users", "get-the-authenticated-user")
         })
         .map(|u| {
             (
@@ -445,7 +436,7 @@ async fn get_current_user_emails(
     auth_to_user(tx, auth)
         .ok_or_else(|| {
             Error::Unauthenticated("Requires authentication")
-                .into_response("users", "get-the-authenticated-user")
+                .into_response("users", "users", "get-the-authenticated-user")
         })
         .map(|u| {
             Json(
@@ -476,7 +467,7 @@ async fn get_user(
     let mut db = Source::get();
     let tok = &db.token();
     crate::model::users::get_user(tok, &username)
-        .ok_or_else(|| Error::NOT_FOUND.into_response("users", "get-a-user"))
+        .ok_or_else(|| Error::NOT_FOUND.into_response("users", "users", "get-a-user"))
         .map(
             // NOTE: works fine for API, but not web
             |u| Json(PublicUser::from(u)),
@@ -495,7 +486,7 @@ async fn get_org(
         .filter(|u| matches!(u.r#type, Type::Organization))
         .ok_or_else(|| {
             info!("{orgname} not found");
-            Error::NOT_FOUND.into_response("orgs", "get-an-organization")
+            Error::NOT_FOUND.into_response("orgs", "orgs", "get-an-organization")
         })
         .map(|u| {
             info!("{orgname} found => {u:?}");
@@ -545,7 +536,7 @@ async fn create_repository(
     };
     let Some(u) = auth.and_then(|a| auth_to_user(&tx, a)) else {
         return Err(Error::Unauthenticated("Requires authentication")
-            .into_response("repos", endpoint));
+            .into_response("repos", "repos", endpoint));
     };
 
     // Repository name can only contain ASCII letters,
@@ -558,7 +549,7 @@ async fn create_repository(
     // apparently length check is after replacement (at least
     // conceptually)
     if name.len() > 100 {
-        return Err(NAME_TOO_LONG.into_response("repos", endpoint));
+        return Err(NAME_TOO_LONG.into_response("repos", "repos", endpoint));
     }
 
     let Some(owner) = owner
@@ -566,13 +557,13 @@ async fn create_repository(
         .then(|| u.clone())
         .or_else(|| crate::model::users::get_user(&tx, owner))
     else {
-        return Err(Error::NOT_FOUND.into_response("repos", endpoint));
+        return Err(Error::NOT_FOUND.into_response("repos", "repos", endpoint));
     };
 
     let Some(repo) = crate::model::repos::create_repository(
         &tx, u.id, owner.id, &name, None,
     ) else {
-        return Err(REPO_CREATION_FAILED.into_response("repos", endpoint));
+        return Err(REPO_CREATION_FAILED.into_response("repos", "repos", endpoint));
     };
 
     info!("Created repository {}/{}", owner.login, name);

@@ -13,7 +13,7 @@ def test_fork_empty(request, org):
     assert ghe.value.data == {
         "message": "The repository exists, but it contains no Git content. "
                    "Empty repositories cannot be forked.",
-        "documentation_url": "https://docs.github.com/rest/reference/repos#create-a-fork"
+        "documentation_url": "https://docs.github.com/rest/repos/forks#create-a-fork"
     }
 
 def test_fork_from_org(request, user, org):
@@ -50,7 +50,7 @@ def test_fork_from_org(request, user, org):
             "code": "invalid",
             "field": "organization"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/repos#create-a-fork"
+        "documentation_url": "https://docs.github.com/rest/repos/forks#create-a-fork"
     }
 
 # FIXME: https://github.blog/changelog/2022-06-27-improved-innersource-collaboration-and-enterprise-fork-policies/
@@ -80,7 +80,7 @@ def test_fork_to_org(request, user, org):
             "code": "invalid",
             "field": "organization"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/repos#create-a-fork"
+        "documentation_url": "https://docs.github.com/rest/repos/forks#create-a-fork"
     }
 
 def test_fork_to_org_already_exists(request, user, org):

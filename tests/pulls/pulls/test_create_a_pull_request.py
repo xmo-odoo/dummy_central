@@ -10,9 +10,6 @@ from github import GithubException, InputGitTreeElement as item
 from ...import pr_payload, check, _fib
 
 def test_basic(repo, config, endpoint, request, users, is_github):
-    # dumb...
-    sep = '/' if is_github else ''
-
     url, get_hook = endpoint
     h = repo.create_hook("web", {
         'url': url,
@@ -34,7 +31,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
         repo.create_pull("test", "", base=repo.default_branch, head="does-not-exist-69")
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/pulls#create-a-pull-request',
+        'documentation_url': 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
         'errors': [{
             'code': 'invalid',
             'field': 'head',
@@ -47,7 +44,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
         repo.create_pull("test", "", base='does-not-exist-68', head="create_pr")
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/pulls#create-a-pull-request',
+        'documentation_url': 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
         'errors': [{
             'code': 'invalid',
             'field': 'base',
@@ -60,7 +57,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
         repo.create_pull("test", "", base='does-not-exist-68', head="does-not-exist-69")
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/pulls#create-a-pull-request',
+        'documentation_url': 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
         'errors': [{
             'code': 'invalid',
             'field': 'base',
@@ -79,7 +76,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
     assert ghe.value.status == 404
     assert ghe.value.data == {
         "message": "Not Found",
-        "documentation_url": "https://docs.github.com/rest/reference/pulls#create-a-pull-request",
+        "documentation_url": "https://docs.github.com/rest/pulls/pulls#create-a-pull-request",
     }
 
     pr = repo.create_pull("test", "", base=repo.default_branch, head="create_pr")
@@ -108,7 +105,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
             "code": "missing_field",
             "field": "title"
         }],
-        "documentation_url": f"https://docs.github.com/rest/reference/pulls{sep}#update-a-pull-request"
+        "documentation_url": f"https://docs.github.com/rest/pulls/pulls#update-a-pull-request"
     }
 
     # immediately test webhook, helps delaying actions
@@ -125,10 +122,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
     assert pr.body == "test"
     payload = pr_payload(get_hook())
     assert payload['action'] == 'edited', payload
-    # for some weird reason an empty body means a non-null but empty
-    # changes NB: this means if a change *adds* a body we can miss it
-    # if we check for change's keys...
-    assert payload['changes'] == {}, payload
+    assert payload['changes'] == {'body': {'from': ''}}, payload
     assert payload['pull_request']['body'] == 'test', payload
     # see above, no-ops don't trigger webhooks
     pr.edit(body="test") # behaviour on duplicate
@@ -178,7 +172,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
             "field": "base",
             "code": "invalid"
         }],
-        "documentation_url": f"https://docs.github.com/rest/reference/pulls{sep}#update-a-pull-request"
+        "documentation_url": f"https://docs.github.com/rest/pulls/pulls#update-a-pull-request"
     }
 
     p = repo.get_pull(pr.number)
@@ -196,7 +190,7 @@ def test_basic(repo, config, endpoint, request, users, is_github):
     assert r.status_code == 422, r.json()
     assert r.json() == {
         'message': 'Validation Failed',
-        'documentation_url': f'https://docs.github.com/rest/reference/pulls{sep}#update-a-pull-request',
+        'documentation_url': f'https://docs.github.com/rest/pulls/pulls#update-a-pull-request',
         'errors': [{
             'code': 'missing_field',
             'field': 'title',
@@ -244,7 +238,7 @@ def test_cross_repo(request, user, repo):
         repo.create_pull("cross", "", base=repo.default_branch, head=f'{user.login}:create_pr_cross')
     assert ghe.value.status == 422
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/pulls#create-a-pull-request',
+        'documentation_url': 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
         'errors': [{
             'code': 'invalid',
             'field': 'head',
@@ -279,7 +273,7 @@ def test_from_issue(repo):
         repo.get_pull(issue.number)
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/pulls#get-a-pull-request',
+        'documentation_url': 'https://docs.github.com/rest/pulls/pulls#get-a-pull-request',
         'message': 'Not Found'
     }
 
@@ -318,7 +312,7 @@ def test_create_pr_from_fake(repo):
             "field": "issue",
             "code": "invalid"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/pulls#create-a-pull-request"
+        "documentation_url": "https://docs.github.com/rest/pulls/pulls#create-a-pull-request"
     }
 
 def test_create_pr_from_pr(repo):
@@ -349,7 +343,7 @@ def test_create_pr_from_pr(repo):
             "field": "issue",
             "code": "invalid"
         }],
-        "documentation_url": "https://docs.github.com/rest/reference/pulls#create-a-pull-request"
+        "documentation_url": "https://docs.github.com/rest/pulls/pulls#create-a-pull-request"
     }
 
 

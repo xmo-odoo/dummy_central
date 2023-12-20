@@ -179,7 +179,7 @@ async fn get_repository(
 
     match crate::model::repos::by_name(tx, &owner, &name) {
         Some(repo) => Ok(Json(repo.to_response(tx, &st.root))),
-        None => Err(Error::NOT_FOUND.into_response("repos", "get-a-repository")),
+        None => Err(Error::NOT_FOUND.into_response("repos", "repos", "get-a-repository")),
     }
 }
 
@@ -193,7 +193,7 @@ async fn update_repository(
 
     let Some(rid) = crate::model::repos::id_by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND
-            .into_response("repos", "update-a-repository")
+            .into_response("repos", "repos", "update-a-repository")
             .into_response());
     };
 
@@ -214,7 +214,7 @@ async fn update_repository(
                     "invalid",
                     &format!("The branch {d} was not found. Please push that ref first or create it via the Git Data API."),
                 )
-            ]).into_response("repos", "update-a-repository").into_response());
+            ]).into_response("repos", "repos", "update-a-repository").into_response());
         }
     }
     // TODO: check if name editions follows same normalisation
@@ -245,7 +245,7 @@ async fn delete_repository(
         tx.commit().unwrap();
         Ok(StatusCode::NO_CONTENT)
     } else {
-        Err(Error::NOT_FOUND.into_response("repos", "delete-a-repository"))
+        Err(Error::NOT_FOUND.into_response("repos", "repos", "delete-a-repository"))
     }
 }
 
@@ -261,7 +261,7 @@ async fn create_fork(
         return Err(Error::Unauthenticated(
             "You must be logged in to do that.",
         )
-        .into_response_full(
+        .into_response(
             "guides",
             "getting-started-with-the-rest-api",
             "authentication",
@@ -269,7 +269,7 @@ async fn create_fork(
     };
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response("repos", "create-a-fork"));
+        return Err(Error::NOT_FOUND.into_response("repos", "forks", "create-a-fork"));
     };
 
     // because the json extractor requires an application/json content-type
@@ -295,13 +295,13 @@ async fn create_fork(
                     .into(),
                     DETAILS,
                 )
-                .into_response("repos", "create-a-fork"));
+                .into_response("repos", "forks", "create-a-fork"));
             }
         } else {
             const DETAILS: &[GithubErrorDetails<'_>] =
                 &[Error::details("Fork", "organization", "invalid", "")];
             return Err(Error::unprocessable("Validation Failed", DETAILS)
-                .into_response("repos", "create-a-fork"));
+                .into_response("repos", "forks", "create-a-fork"));
         }
     } else {
         &user
@@ -310,7 +310,7 @@ async fn create_fork(
     if crate::model::git::get_objects(&tx, repo.network).is_empty() {
         return Err(Error::Forbidden(
             "The repository exists, but it contains no Git content. Empty repositories cannot be forked."
-        ).into_response("repos", "create-a-fork"));
+        ).into_response("repos", "forks", "create-a-fork"));
     }
 
     // if the prospective new owner already has a fork (or source,
@@ -371,7 +371,7 @@ async fn list_hooks(
     let tx = &db.token();
     let Some(repo) = id_by_name(tx, &owner, &name) else {
         return Err(
-            Error::NOT_FOUND.into_response("repos", "list-repository-webhooks")
+            Error::NOT_FOUND.into_response("repos", "repos", "list-repository-webhooks")
         );
     };
 
@@ -427,7 +427,7 @@ async fn create_hook(
     // TODO: error if hook.name != web
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND
-            .into_response("repos", "create-a-repository-webhook"));
+            .into_response("repos", "repos", "create-a-repository-webhook"));
     };
     let mut conf = HookConfig {
         id: 0,
@@ -573,7 +573,7 @@ async fn list_commits(
     let tx = &db.token();
 
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response("repos", "list-commits"));
+        return Err(Error::NOT_FOUND.into_response("repos", "repos", "list-commits"));
     };
 
     // TODO: what happens if the requested ref does not exist?
@@ -594,7 +594,7 @@ async fn list_commits(
             )
         });
     let Some(oid) = sha_or_branch else {
-        return Err(Error::NOT_FOUND.into_response("repos", "list-commits"));
+        return Err(Error::NOT_FOUND.into_response("repos", "repos", "list-commits"));
     };
 
     let mut output = vec![];
@@ -656,7 +656,7 @@ async fn get_commit(
     let tx = &db.token();
 
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response_full(
+        return Err(Error::NOT_FOUND.into_response(
             "commits",
             "commits",
             "get-a-commit",
@@ -681,7 +681,7 @@ async fn get_commit(
             {
                 oid
             } else {
-                return Err(Error::NOT_FOUND.into_response_full(
+                return Err(Error::NOT_FOUND.into_response(
                     "commits",
                     "commits",
                     "get-a-commit",
@@ -693,7 +693,7 @@ async fn get_commit(
     let Some((kind, data)) =
         crate::model::git::get_in(tx, repo.network, &oid, &mut buf)
     else {
-        return Err(Error::NOT_FOUND.into_response_full(
+        return Err(Error::NOT_FOUND.into_response(
             "commits",
             "commits",
             "get-a-commit",
@@ -702,7 +702,7 @@ async fn get_commit(
 
     if kind != git_object::Kind::Commit {
         let msg = format!("No commit found for SHA: {commit_ref}");
-        return Err(Error::Unprocessable(msg.into(), &[]).into_response_full(
+        return Err(Error::Unprocessable(msg.into(), &[]).into_response(
             "commits",
             "commits",
             "get-a-commit",
@@ -723,7 +723,7 @@ async fn get_status(
     let tx = &db.token();
 
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response_full(
+        return Err(Error::NOT_FOUND.into_response(
             "commits",
             "commits",
             "get-a-commit",
@@ -739,6 +739,7 @@ async fn get_status(
         })
     else {
         return Err(Error::NOT_FOUND.into_response(
+            "repos",
             "repos",
             "get-the-combined-status-for-a-specific-reference",
         ));
@@ -786,11 +787,11 @@ async fn create_or_update_contents(
     // TODO: is this the right error response?
     let Some(user) = auth_to_user(&tx, auth) else {
         return Err(Error::NOT_FOUND
-            .into_response("repos", "create-or-update-file-contents"));
+            .into_response("repos", "repos", "create-or-update-file-contents"));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND
-            .into_response("repos", "create-or-update-file-contents"));
+            .into_response("repos", "repos", "create-or-update-file-contents"));
     };
 
     // TODO: check what happens if giving github a ref (including prefix)
@@ -806,7 +807,7 @@ async fn create_or_update_contents(
         return Err(Error::NotFound(format!(
             "Branch {branch_name} not found"
         ).into())
-        .into_response("repos", "create-or-update-file-contents"));
+        .into_response("repos", "repos", "create-or-update-file-contents"));
     }
     // FIXME: this is probably the same shit as create_blob, but needs to verify
     let data = BASE64_STANDARD
@@ -913,7 +914,7 @@ async fn create_or_update_contents(
         Json(FileCommit {
             content: Content {
                 // `name` is the last segment of `path`...
-                name: path.rsplit_once('/').unwrap().1.to_string(),
+                name: path.rsplit('/').next().unwrap().to_string(),
                 path: path.to_owned(),
                 sha: file_oid.to_hex().to_string(),
                 size: data_size,
@@ -970,7 +971,7 @@ async fn create_status(
     let tx = db.token_eager();
     let creator = crate::github::auth_to_user(&tx, auth).unwrap();
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response_full(
+        return Err(Error::NOT_FOUND.into_response(
             "commits",
             "statuses",
             "create-a-commit-status",
@@ -993,7 +994,7 @@ async fn create_status(
             format!("No commit found for SHA: {commit}").into(),
             &[],
         )
-        .into_response_full(
+        .into_response(
             "commits",
             "statuses",
             "create-a-commit-status",
@@ -1008,7 +1009,7 @@ async fn create_status(
             "state is not included in the list",
         )];
         return Err(Error::unprocessable("Validation Failed", DETAILS)
-            .into_response_full(
+            .into_response(
                 "commits",
                 "statuses",
                 "create-a-commit-status",
@@ -1019,7 +1020,7 @@ async fn create_status(
         const DETAILS: &[GithubErrorDetails<'_>] =
             &[Error::details("Status", "context", "missing_field", "")];
         return Err(Error::unprocessable("Validation Failed", DETAILS)
-            .into_response_full(
+            .into_response(
                 "commits",
                 "statuses",
                 "create-a-commit-status",
@@ -1068,12 +1069,12 @@ async fn create_branch_merge(
     let tx = db.token_eager();
     let Some(user) = auth_to_user(&tx, auth) else {
         return Err(Error::Forbidden("")
-            .into_response("branches", "merge-a-branch")
+            .into_response("branches", "branches", "merge-a-branch")
             .into_response());
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND
-            .into_response("branches", "merge-a-branch")
+            .into_response("branches", "branches", "merge-a-branch")
             .into_response());
     };
 
@@ -1081,7 +1082,7 @@ async fn create_branch_merge(
     let Some(base) = crate::model::git::refs::resolve(&tx, repo.id, &base_ref)
     else {
         return Err(Error::NOT_FOUND
-            .into_response("branches", "merge-a-branch")
+            .into_response("branches", "branches", "merge-a-branch")
             .into_response());
     };
 
@@ -1091,12 +1092,12 @@ async fn create_branch_merge(
         let Some(object) = crate::model::git::load(&tx, repo.network, &h)
         else {
             return Err(Error::NOT_FOUND
-                .into_response("branches", "merge-a-branch")
+                .into_response("branches", "branches", "merge-a-branch")
                 .into_response());
         };
         if object.kind() != git_object::Kind::Commit {
             return Err(Error::unprocessable("", &[])
-                .into_response("branches", "merge-a-branch")
+                .into_response("branches", "branches", "merge-a-branch")
                 .into_response());
         }
         h
@@ -1108,7 +1109,7 @@ async fn create_branch_merge(
         h
     } else {
         return Err(Error::NOT_FOUND
-            .into_response("branches", "merge-a-branch")
+            .into_response("branches", "branches", "merge-a-branch")
             .into_response());
     };
 
@@ -1164,7 +1165,7 @@ async fn create_branch_merge(
             StatusCode::CONFLICT,
             Json(GithubError {
                 message: "Merge Conflict".into(),
-                documentation_url: "https://docs.github.com/rest/reference/branches#merge-a-branch" ,
+                documentation_url: "https://docs.github.com/rest/branches/branches#merge-a-branch" ,
                 errors: &[]
             })
         ).into_response())
@@ -1189,7 +1190,7 @@ async fn list_collaborators(
     else {
         // FIXME: correct error?
         return Err(Error::NOT_FOUND
-            .into_response("collaborators", "list-collaborators"));
+            .into_response("collaborators", "collaborators", "list-collaborators"));
     };
     Ok(Json(
         crate::model::repos::get_collaborators(tx, repo_id)
@@ -1238,7 +1239,7 @@ async fn add_collaborator(
     let mut db = Source::get();
     let tx = db.token();
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response_full(
+        return Err(Error::NOT_FOUND.into_response(
             "collaborators",
             "collaborators",
             "add-a-repository-collaborator",
@@ -1253,14 +1254,14 @@ async fn add_collaborator(
                 "Repository owner cannot be a collaborator",
             )];
         return Err(Error::unprocessable("Validation Failed", DEETS)
-            .into_response_full(
+            .into_response(
                 "reference",
                 "repos",
                 "add-a-repository-collaborator",
             ));
     }
     if !crate::model::repos::add_collaborator(&tx, repo.id, new_collaborator) {
-        return Err(Error::NOT_FOUND.into_response_full(
+        return Err(Error::NOT_FOUND.into_response(
             "collaborators",
             "collaborators",
             "add-a-repository-collaborator",
@@ -1284,27 +1285,27 @@ async fn get_branch(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response("branches", "get-a-branch"));
+        return Err(Error::NOT_FOUND.into_response("branches", "branches", "get-a-branch"));
     };
 
     let branch_ref = format!("refs/heads/{branch_name}");
     let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &branch_ref)
     else {
-        return Err(Error::NOT_FOUND.into_response("branches", "get-a-branch"));
+        return Err(Error::NOT_FOUND.into_response("branches", "branches", "get-a-branch"));
     };
 
     let mut buf = Vec::new();
     let Some((kind, data)) =
         crate::model::git::get_in(tx, repo.network, &oid, &mut buf)
     else {
-        return Err(Error::NOT_FOUND.into_response("branches", "get-a-branch"));
+        return Err(Error::NOT_FOUND.into_response("branches", "branches", "get-a-branch"));
     };
 
     // FIXME: is this the right error?
     if kind != git_object::Kind::Commit {
         let msg = format!("No commit found for SHA: {branch_ref}");
         return Err(Error::Unprocessable(msg.into(), &[])
-            .into_response("branches", "get-a-branch"));
+            .into_response("branches", "branches", "get-a-branch"));
     }
     let commit = git_object::CommitRef::from_bytes(data).unwrap();
 

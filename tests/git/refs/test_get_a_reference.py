@@ -26,7 +26,7 @@ def test_get_refs(repo, endpoint, config):
         repo.get_git_ref('heads/main2')
     assert ghe.value.status == 404
     assert ghe.value.data == {
-        'documentation_url': 'https://docs.github.com/rest/reference/git#get-a-reference',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#get-all-references-in-a-namespace',
         'message': 'Not Found'
     }
 
