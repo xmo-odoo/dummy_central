@@ -45,7 +45,7 @@ mod repos;
 
 #[derive(Serialize)]
 struct GithubError<'a> {
-    message: &'a str,
+    message: Cow<'a, str>,
     documentation_url: &'a str,
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     errors: &'a [GithubErrorDetails<'a>],
@@ -181,7 +181,7 @@ impl IntoResponse for GHError<'_> {
             Error::NotFound => (
                 StatusCode::NOT_FOUND,
                 Json(GithubError {
-                    message: "Not Found",
+                    message: "Not Found".into(),
                     documentation_url,
                     errors: &[],
                 }),
@@ -189,7 +189,7 @@ impl IntoResponse for GHError<'_> {
             Error::NotFound2(message) => (
                 StatusCode::NOT_FOUND,
                 Json(GithubError {
-                    message,
+                    message: message.into(),
                     documentation_url,
                     errors: &[],
                 }),
@@ -197,7 +197,7 @@ impl IntoResponse for GHError<'_> {
             Error::Unauthenticated(message) => (
                 StatusCode::UNAUTHORIZED,
                 Json(GithubError {
-                    message,
+                    message: message.into(),
                     documentation_url,
                     errors: &[],
                 }),
@@ -205,7 +205,7 @@ impl IntoResponse for GHError<'_> {
             Error::Forbidden(message) => (
                 StatusCode::FORBIDDEN,
                 Json(GithubError {
-                    message,
+                    message: message.into(),
                     documentation_url,
                     errors: &[],
                 }),
@@ -228,9 +228,15 @@ enum Error<'a> {
     NotFound2(&'a str),
     Unauthenticated(&'a str),
     Forbidden(&'a str),
-    Unprocessable(&'a str, &'a [GithubErrorDetails<'a>]),
+    Unprocessable(Cow<'a, str>, &'a [GithubErrorDetails<'a>]),
 }
 impl<'e> Error<'e> {
+    const fn unprocessable(
+        m: &'e str,
+        details: &'e [GithubErrorDetails<'e>],
+    ) -> Self {
+        Self::Unprocessable(Cow::Borrowed(m), details)
+    }
     const fn repo(m: &'static str) -> GithubErrorDetails<'static> {
         Self::details("Repository", "name", "custom", m)
     }
@@ -521,11 +527,11 @@ async fn get_org(
         })
 }
 
-const NAME_TOO_LONG: Error = Error::Unprocessable(
+const NAME_TOO_LONG: Error = Error::unprocessable(
     "Repository creation failed.",
     &[Error::repo("name is too long (maximum is 100 characters)")],
 );
-const REPO_CREATION_FAILED: Error = Error::Unprocessable(
+const REPO_CREATION_FAILED: Error = Error::unprocessable(
     "Repository creation failed.",
     &[Error::repo("name already exists on this account")],
 );

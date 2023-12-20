@@ -29,7 +29,8 @@ pub mod git_protocol;
 pub mod issues;
 
 use crate::github::{
-    auth_to_user, Authorization, Config, Error, GithubError, SimpleUser, St,
+    auth_to_user, Authorization, Config, Error, GithubError,
+    GithubErrorDetails, SimpleUser, St,
 };
 use crate::model::repos::RepositoryId;
 use crate::model::users::find_current_user;
@@ -103,7 +104,8 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
                     sha: commit.tree().to_hex().to_string(),
                     url: None,
                 },
-                message: String::from_utf8_lossy(commit.message.trim()).to_string(),
+                message: String::from_utf8_lossy(commit.message.trim())
+                    .to_string(),
                 author: Some(commit.author.into()),
                 committer: Some(commit.committer.into()),
                 comments_count: 0,
@@ -205,7 +207,7 @@ async fn update_repository(
         )
         .is_none()
         {
-            return Err(Error::Unprocessable("Validation Failed", &[
+            return Err(Error::unprocessable("Validation Failed", &[
                 Error::details(
                     "Repository",
                     "default_branch",
@@ -252,7 +254,7 @@ async fn create_fork(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
     req: Bytes,
-) -> Result<(StatusCode, Json<RepositoryResponse>), Response> {
+) -> Result<(StatusCode, Json<RepositoryResponse>), GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
@@ -263,14 +265,11 @@ async fn create_fork(
             "guides",
             "getting-started-with-the-rest-api",
             "authentication",
-        )
-        .into_response());
+        ));
     };
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound
-            .into_response("repos", "create-a-fork")
-            .into_response());
+        return Err(Error::NotFound.into_response("repos", "create-a-fork"));
     };
 
     // because the json extractor requires an application/json content-type
@@ -286,23 +285,23 @@ async fn create_fork(
                 _org = u;
                 &_org
             } else {
+                const DETAILS: &[GithubErrorDetails<'_>] =
+                    &[Error::details("Fork", "organization", "invalid", "")];
                 return Err(Error::Unprocessable(
-                    &format!(
+                    format!(
                         "'{org}' is the login for a user account. \
                         You must pass the login for an organization account."
-                    ),
-                    &[Error::details("Fork", "organization", "invalid", "")],
+                    )
+                    .into(),
+                    DETAILS,
                 )
-                .into_response("repos", "create-a-fork")
-                .into_response());
+                .into_response("repos", "create-a-fork"));
             }
         } else {
-            return Err(Error::Unprocessable(
-                "Validation Failed",
-                &[Error::details("Fork", "organization", "invalid", "")],
-            )
-            .into_response("repos", "create-a-fork")
-            .into_response());
+            const DETAILS: &[GithubErrorDetails<'_>] =
+                &[Error::details("Fork", "organization", "invalid", "")];
+            return Err(Error::unprocessable("Validation Failed", DETAILS)
+                .into_response("repos", "create-a-fork"));
         }
     } else {
         &user
@@ -311,7 +310,7 @@ async fn create_fork(
     if crate::model::git::get_objects(&tx, repo.network).is_empty() {
         return Err(Error::Forbidden(
             "The repository exists, but it contains no Git content. Empty repositories cannot be forked."
-        ).into_response("repos", "create-a-fork").into_response());
+        ).into_response("repos", "create-a-fork"));
     }
 
     // if the prospective new owner already has a fork (or source,
@@ -637,12 +636,11 @@ async fn list_commits(
 async fn commits_query(
     st: State<St>,
     Path((owner, name, path)): Path<(String, String, String)>,
-) -> Result<Response, Response> {
+) -> Result<Response, GHError<'static>> {
     if let Some(commit_ref) = path.strip_suffix("/status") {
         return get_status(st, Path((owner, name, commit_ref.to_string())))
             .await
-            .map(|r| r.into_response())
-            .map_err(|e| e.into_response());
+            .map(|r| r.into_response());
     }
 
     get_commit(st, Path((owner, name, path)))
@@ -653,14 +651,16 @@ async fn commits_query(
 async fn get_commit(
     State(st): State<St>,
     Path((owner, name, commit_ref)): Path<(String, String, String)>,
-) -> Result<Json<CommitsResponse>, Response> {
+) -> Result<Json<CommitsResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = &db.token();
 
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound
-            .into_response_full("commits", "commits", "get-a-commit")
-            .into_response());
+        return Err(Error::NotFound.into_response_full(
+            "commits",
+            "commits",
+            "get-a-commit",
+        ));
     };
 
     let commit_ref = commit_ref.as_str();
@@ -681,9 +681,11 @@ async fn get_commit(
             {
                 oid
             } else {
-                return Err(Error::NotFound
-                    .into_response_full("commits", "commits", "get-a-commit")
-                    .into_response());
+                return Err(Error::NotFound.into_response_full(
+                    "commits",
+                    "commits",
+                    "get-a-commit",
+                ));
             }
         };
 
@@ -691,16 +693,20 @@ async fn get_commit(
     let Some((kind, data)) =
         crate::model::git::get_in(tx, repo.network, &oid, &mut buf)
     else {
-        return Err(Error::NotFound
-            .into_response_full("commits", "commits", "get-a-commit")
-            .into_response());
+        return Err(Error::NotFound.into_response_full(
+            "commits",
+            "commits",
+            "get-a-commit",
+        ));
     };
 
     if kind != git_object::Kind::Commit {
         let msg = format!("No commit found for SHA: {commit_ref}");
-        return Err(Error::Unprocessable(&msg, &[])
-            .into_response_full("commits", "commits", "get-a-commit")
-            .into_response());
+        return Err(Error::Unprocessable(msg.into(), &[]).into_response_full(
+            "commits",
+            "commits",
+            "get-a-commit",
+        ));
     }
     let commit = git_object::CommitRef::from_bytes(data).unwrap();
 
@@ -923,7 +929,8 @@ async fn create_or_update_contents(
             commit: Commit {
                 sha: commit_oid.to_hex().to_string(),
                 node_id: None,
-                message: String::from_utf8_lossy(commit.message.trim()).to_string(),
+                message: String::from_utf8_lossy(commit.message.trim())
+                    .to_string(),
                 tree: Tree {
                     sha: oid.to_hex().to_string(),
                     url: None,
@@ -961,14 +968,16 @@ async fn create_status(
         target_url,
         description,
     }): Json<CreateStatusGarbage>,
-) -> Result<Json<CreateStatusResponse>, Response> {
+) -> Result<Json<CreateStatusResponse>, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
     let creator = crate::github::auth_to_user(&tx, auth).unwrap();
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound
-            .into_response_full("commits", "statuses", "create-a-commit-status")
-            .into_response());
+        return Err(Error::NotFound.into_response_full(
+            "commits",
+            "statuses",
+            "create-a-commit-status",
+        ));
     };
 
     // because warp doesn't %-decode path fragments (seanmonstar/warp#242)
@@ -984,34 +993,40 @@ async fn create_status(
         .and_then(|c| crate::model::git::get(&tx, repo.network, &c))
     else {
         return Err(Error::Unprocessable(
-            &format!("No commit found for SHA: {commit}"),
+            format!("No commit found for SHA: {commit}").into(),
             &[],
         )
-        .into_response_full("commits", "statuses", "create-a-commit-status")
-        .into_response());
+        .into_response_full(
+            "commits",
+            "statuses",
+            "create-a-commit-status",
+        ));
     };
 
     let Ok(state) = state.as_str().try_into() else {
-        return Err(Error::Unprocessable(
-            "Validation Failed",
-            &[Error::details(
-                "Status",
-                "state",
-                "custom",
-                "state is not included in the list",
-            )],
-        )
-        .into_response_full("commits", "statuses", "create-a-commit-status")
-        .into_response());
+        const DETAILS: &[GithubErrorDetails<'_>] = &[Error::details(
+            "Status",
+            "state",
+            "custom",
+            "state is not included in the list",
+        )];
+        return Err(Error::unprocessable("Validation Failed", DETAILS)
+            .into_response_full(
+                "commits",
+                "statuses",
+                "create-a-commit-status",
+            ));
     };
 
     if context.is_empty() {
-        return Err(Error::Unprocessable(
-            "Validation Failed",
-            &[Error::details("Status", "context", "missing_field", "")],
-        )
-        .into_response_full("commits", "statuses", "create-a-commit-status")
-        .into_response());
+        const DETAILS: &[GithubErrorDetails<'_>] =
+            &[Error::details("Status", "context", "missing_field", "")];
+        return Err(Error::unprocessable("Validation Failed", DETAILS)
+            .into_response_full(
+                "commits",
+                "statuses",
+                "create-a-commit-status",
+            ));
     }
 
     let id = *crate::model::create_status(
@@ -1083,7 +1098,7 @@ async fn create_branch_merge(
                 .into_response());
         };
         if object.kind() != git_object::Kind::Commit {
-            return Err(Error::Unprocessable("", &[])
+            return Err(Error::unprocessable("", &[])
                 .into_response("branches", "merge-a-branch")
                 .into_response());
         }
@@ -1151,7 +1166,7 @@ async fn create_branch_merge(
         Err((
             StatusCode::CONFLICT,
             Json(GithubError {
-                message: "Merge Conflict",
+                message: "Merge Conflict".into(),
                 documentation_url: "https://docs.github.com/rest/reference/branches#merge-a-branch" ,
                 errors: &[]
             })
@@ -1240,7 +1255,7 @@ async fn add_collaborator(
                 "custom",
                 "Repository owner cannot be a collaborator",
             )];
-        return Err(Error::Unprocessable("Validation Failed", DEETS)
+        return Err(Error::unprocessable("Validation Failed", DEETS)
             .into_response_full(
                 "reference",
                 "repos",
@@ -1267,38 +1282,32 @@ async fn add_collaborator(
 async fn get_branch(
     State(st): State<St>,
     Path((owner, name, branch_name)): Path<(String, String, String)>,
-) -> Result<Json<github_types::branches::BranchWithProtection>, Response> {
+) -> Result<Json<github_types::branches::BranchWithProtection>, GHError<'static>>
+{
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound
-            .into_response("branches", "get-a-branch")
-            .into_response());
+        return Err(Error::NotFound.into_response("branches", "get-a-branch"));
     };
 
     let branch_ref = format!("refs/heads/{branch_name}");
     let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &branch_ref)
     else {
-        return Err(Error::NotFound
-            .into_response("branches", "get-a-branch")
-            .into_response());
+        return Err(Error::NotFound.into_response("branches", "get-a-branch"));
     };
 
     let mut buf = Vec::new();
     let Some((kind, data)) =
         crate::model::git::get_in(tx, repo.network, &oid, &mut buf)
     else {
-        return Err(Error::NotFound
-            .into_response("branches", "get-a-branch")
-            .into_response());
+        return Err(Error::NotFound.into_response("branches", "get-a-branch"));
     };
 
     // FIXME: is this the right error?
     if kind != git_object::Kind::Commit {
         let msg = format!("No commit found for SHA: {branch_ref}");
-        return Err(Error::Unprocessable(&msg, &[])
-            .into_response("branches", "get-a-branch")
-            .into_response());
+        return Err(Error::Unprocessable(msg.into(), &[])
+            .into_response("branches", "get-a-branch"));
     }
     let commit = git_object::CommitRef::from_bytes(data).unwrap();
 

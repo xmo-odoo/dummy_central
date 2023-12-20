@@ -404,7 +404,7 @@ async fn create_pull_request(
                 _head_repo = fork;
                 (&_head_repo, branch)
             } else {
-                return Err(Error::Unprocessable(
+                return Err(Error::unprocessable(
                     "Validation Failed",
                     &[Error::details("PullRequest", "head", "invalid", "")],
                 )
@@ -421,7 +421,7 @@ async fn create_pull_request(
     fn validation_failed<'a>(
         es: &'a [crate::github::GithubErrorDetails<'_>],
     ) -> GHError<'a> {
-        Error::Unprocessable("Validation Failed", es)
+        Error::unprocessable("Validation Failed", es)
             .into_response("pulls", "create-a-pull-request")
     }
 
@@ -463,7 +463,7 @@ async fn create_pull_request(
                     let mut deets =
                         Error::details("PullRequest", "issue", "invalid", "");
                     deets.value = Some(issue);
-                    return Err(Error::Unprocessable(err, &[deets])
+                    return Err(Error::unprocessable(err, &[deets])
                         .into_response("pulls", "create-a-pull-request")
                         .into_response());
                 }
@@ -537,7 +537,7 @@ async fn update_pull_request(
 
     let title = if let Some(t) = update.title {
         if t.is_empty() {
-            return Err(Error::Unprocessable(
+            return Err(Error::unprocessable(
                 "Validation Failed",
                 &[Error::details("PullRequest", "title", "missing_field", "")],
             )
@@ -578,7 +578,7 @@ async fn update_pull_request(
     // TODO: test case, apparently closing & rebasing a PR in the same call
     //       performs the closing first, which fails the base change
     if update.base.is_some() && matches!(pr.issue.state, prs::State::Closed) {
-        return Err(Error::Unprocessable(
+        return Err(Error::unprocessable(
             "Validation Failed",
             &[Error::details(
                 "PullRequest",
@@ -594,7 +594,7 @@ async fn update_pull_request(
     // TODO: test actual message
     // TODO: test edge behaviours of updating closed PRs e.g. when hooks occur exactly
     if state == Some(prs::State::Open) && pr.dead {
-        return Err(Error::Unprocessable(
+        return Err(Error::unprocessable(
             "can not reopen a force-pushed PR",
             &[],
         )
@@ -621,7 +621,7 @@ async fn update_pull_request(
         {
             prs::set_base(&tx, pr.id, base);
         } else {
-            return Err(Error::Unprocessable(
+            return Err(Error::unprocessable(
                 "Validation Failed",
                 &[Error::details(
                     "PullRequest",

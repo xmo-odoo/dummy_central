@@ -263,11 +263,19 @@ async fn get_commit(
         return Err(Error::NotFound.into_response("git", "get-a-commit"));
     };
 
-    let oid =
-        git_hash::ObjectId::from_hex(cid.as_bytes()).expect("invalid sha");
-    let obj = crate::model::git::load(tx, repo.network, &oid)
-        .expect("unknown object");
-    let commit = obj.into_commit();
+    let not_found = || {
+        let msg = format!("No commit found for SHA: {cid}");
+        return Error::Unprocessable(msg.into(), &[]).into_response_full(
+            "commits",
+            "commits",
+            "get-a-commit",
+        );
+    };
+    let oid = git_hash::ObjectId::from_hex(cid.as_bytes())
+        .map_err(|_| not_found())?;
+    let commit = crate::model::git::load(tx, repo.network, &oid)
+        .and_then(|obj| obj.try_into_commit().ok())
+        .ok_or_else(not_found)?;
 
     Ok(Json(super::Commit {
         sha: cid,
@@ -389,14 +397,14 @@ async fn create_ref(
     let tx = db.token_eager();
 
     if !req.r#ref.starts_with("refs/") {
-        return Err(Error::Unprocessable(
+        return Err(Error::unprocessable(
             "Reference name must start with 'refs/'.",
             &[],
         )
         .into_response("git", "create-a-reference"));
     }
     if req.r#ref.matches('/').count() < 2 {
-        return Err(Error::Unprocessable(
+        return Err(Error::unprocessable(
             "Reference name must contain at least three slash-separated components.",
             &[],
         )
@@ -410,21 +418,21 @@ async fn create_ref(
     // FIXME: should fail for "empty repository" aka repo with no branches
     let oid = git_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
     let Some(obj) = crate::model::git::load(&tx, repo.network, &oid) else {
-        return Err(Error::Unprocessable("Object does not exist", &[])
+        return Err(Error::unprocessable("Object does not exist", &[])
             .into_response("git", "create-a-reference"));
     };
 
     if req.r#ref.starts_with("refs/heads/") && obj.kind() != Kind::Commit {
-        return Err(Error::Unprocessable("Reference update failed", &[])
+        return Err(Error::unprocessable("Reference update failed", &[])
             .into_response("git", "create-a-reference"));
     }
     if req.r#ref.starts_with("refs/tags/") && obj.kind() != Kind::Tag {
-        return Err(Error::Unprocessable("Reference update failed", &[])
+        return Err(Error::unprocessable("Reference update failed", &[])
             .into_response("git", "create-a-reference"));
     }
 
     if crate::model::git::refs::resolve(&tx, repo.id, &req.r#ref).is_some() {
-        return Err(Error::Unprocessable("Reference already exists", &[])
+        return Err(Error::unprocessable("Reference already exists", &[])
             .into_response("git", "create-a-reference"));
     } else {
         crate::model::git::refs::create(&tx, repo.id, &req.r#ref, &oid);
@@ -544,12 +552,12 @@ async fn update_ref(
     let Some(current_oid) =
         crate::model::git::refs::resolve(&tx, repo.id, &refname)
     else {
-        return Err(Error::Unprocessable("Reference does not exist", &[])
+        return Err(Error::unprocessable("Reference does not exist", &[])
             .into_response("git", "update-a-reference"));
     };
     let new_oid = git_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
     let Some(new) = crate::model::git::load(&tx, repo.network, &new_oid) else {
-        return Err(Error::Unprocessable("Object does not exist", &[])
+        return Err(Error::unprocessable("Object does not exist", &[])
             .into_response("git", "update-a-reference"));
     };
 
@@ -561,7 +569,7 @@ async fn update_ref(
         //       which triggers the check
         if refname.starts_with("refs/heads/") {
             let Some(new) = new.as_commit() else {
-                return Err(Error::Unprocessable(
+                return Err(Error::unprocessable(
                     "Object is not a commit",
                     &[],
                 )
@@ -572,7 +580,7 @@ async fn update_ref(
                 .any(|oid| oid == current_oid)
             {
                 if !req.force {
-                    return Err(Error::Unprocessable(
+                    return Err(Error::unprocessable(
                         "Update is not a fast forward",
                         &[],
                     )
@@ -581,7 +589,7 @@ async fn update_ref(
                 forced = true;
             }
         } else if refname.starts_with("refs/tags/") && new.kind() != Kind::Tag {
-            return Err(Error::Unprocessable("Object is not a tag", &[])
+            return Err(Error::unprocessable("Object is not a tag", &[])
                 .into_response("git", "update-a-reference"));
         }
 
@@ -683,7 +691,7 @@ async fn delete_ref(
         tx.commit().unwrap();
         Ok(http::StatusCode::NO_CONTENT)
     } else {
-        Err(Error::Unprocessable("Reference does not exist", &[])
+        Err(Error::unprocessable("Reference does not exist", &[])
             .into_response("git", "delete-a-reference"))
     }
 }
