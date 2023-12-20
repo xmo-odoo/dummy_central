@@ -282,7 +282,7 @@ async fn get_pull_request(
 
     let Some(pr_id) = prs::find_id(tx, &owner, &name, pull_number) else {
         return Err(
-            Error::NotFound.into_response("pulls", "get-a-pull-request")
+            Error::NOT_FOUND.into_response("pulls", "get-a-pull-request")
         );
     };
 
@@ -296,7 +296,7 @@ async fn get_pull_request_commits(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(pr) = prs::find_pr(tx, &owner, &name, pull_number) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("pulls", "list-commits-on-a-pull-request"));
     };
 
@@ -376,12 +376,12 @@ async fn create_pull_request(
     let Some(user) =
         auth.and_then(|auth| crate::github::auth_to_user(&tx, auth))
     else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("pulls", "create-a-pull-request")
             .into_response());
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("pulls", "create-a-pull-request")
             .into_response());
     };
@@ -517,13 +517,13 @@ async fn update_pull_request(
     let tx = db.token_eager();
     let user = crate::github::auth_to_user(&tx, auth).unwrap();
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("pulls", "update-a-pull-request")
             .into_response());
     };
 
     let Some(pr) = find_pr(&tx, &owner, &name, number) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("pulls", "update-a-pull-request")
             .into_response());
     };
@@ -717,15 +717,15 @@ async fn create_review(
     let tx = db.token_eager();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("reviews", "create-a-review-for-a-pull-request"));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("reviews", "create-a-review-for-a-pull-request"));
     };
     let Some(pr) = prs::find_id(&tx, &owner, &name, pr) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("reviews", "create-a-review-for-a-pull-request"));
     };
 
@@ -802,7 +802,7 @@ async fn list_reviews(
     let tx = &db.token();
 
     let Some(pr) = prs::find_id(tx, &owner, &name, pr) else {
-        return Err(Error::NotFound
+        return Err(Error::NOT_FOUND
             .into_response("reviews", "list-reviews-for-a-pull-request"));
     };
 
@@ -868,13 +868,13 @@ async fn list_review_comments(
     let tx = &db.token();
 
     let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "reviews",
             "list-comments-for-a-pull-request-review",
         ));
     };
     let Some(review) = reviews::get_by_i64(tx, review_id) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "reviews",
             "list-comments-for-a-pull-request-review",
         ));
@@ -897,7 +897,7 @@ async fn list_pr_comments(
     let tx = &db.token();
 
     let Some(pr_id) = prs::find_id(tx, &owner, &name, pr_number) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "reviews",
             "list-review-comments-on-a-pull-request",
         ));
@@ -919,7 +919,7 @@ async fn create_review_comment(
     let tx = db.token();
 
     let Some(pr_id) = prs::find_id(&tx, &owner, &name, pr_number) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "update-a-review-comment-for-a-pull-request",
         ));
@@ -947,7 +947,7 @@ async fn get_review_comment(
     let tx = &db.token();
 
     let Some(repo_id) = id_by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "get-a-review-comment-for-a-pull-request",
         ));
@@ -956,7 +956,7 @@ async fn get_review_comment(
     let Some(comment) = reviews::comment_by_i64(tx, repo_id, comment_id)
         .map(|cid| reviews::get_comment(tx, cid))
     else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "get-a-review-comment-for-a-pull-request",
         ));
@@ -974,14 +974,14 @@ async fn update_review_comment(
     let tx = db.token();
 
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "create-a-review-comment-for-a-pull-request",
         ));
     };
     let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id)
     else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "create-a-review-comment-for-a-pull-request",
         ));
@@ -1004,14 +1004,14 @@ async fn delete_review_comment(
     let tx = db.token();
 
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
         ));
     };
     let Some(comment_id) = reviews::comment_by_i64(&tx, repo_id, comment_id)
     else {
-        return Err(Error::NotFound.into_response(
+        return Err(Error::NOT_FOUND.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
         ));
@@ -1021,7 +1021,7 @@ async fn delete_review_comment(
         tx.commit();
         Ok(http::StatusCode::NO_CONTENT)
     } else {
-        Err(Error::NotFound.into_response(
+        Err(Error::NOT_FOUND.into_response(
             "pulls",
             "delete-a-review-comment-for-a-pull-request",
         ))
@@ -1036,7 +1036,7 @@ async fn get_issue(
     let tx = &db.token();
 
     let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, number) else {
-        return Err(Error::NotFound.into_response("issues", "get-an-issue"));
+        return Err(Error::NOT_FOUND.into_response("issues", "get-an-issue"));
     };
 
     let issue = prs::get_issue(tx, issue_id);
@@ -1077,7 +1077,7 @@ async fn create_issue(
     };
 
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("issues", "create-an-issue"));
+        return Err(Error::NOT_FOUND.into_response("issues", "create-an-issue"));
     };
 
     let issue_id = prs::issue_create(
@@ -1136,7 +1136,7 @@ async fn get_issue_labels(
     let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, issue_number)
     else {
         return Err(
-            Error::NotFound.into_response("labels", "list-labels-for-an-issue")
+            Error::NOT_FOUND.into_response("labels", "list-labels-for-an-issue")
         );
     };
 
@@ -1161,7 +1161,7 @@ async fn replace_issue_labels(
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
         return Err(
-            Error::NotFound.into_response("labels", "add-labels-to-an-issue")
+            Error::NOT_FOUND.into_response("labels", "add-labels-to-an-issue")
         );
     };
 
@@ -1196,7 +1196,7 @@ async fn add_issue_labels(
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
         return Err(
-            Error::NotFound.into_response("labels", "add-labels-to-an-issue")
+            Error::NOT_FOUND.into_response("labels", "add-labels-to-an-issue")
         );
     };
 
@@ -1227,7 +1227,7 @@ async fn delete_issue_label(
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
         return Err(
-            Error::NotFound.into_response("labels", "add-labels-to-an-issue")
+            Error::NOT_FOUND.into_response("labels", "add-labels-to-an-issue")
         );
     };
 
@@ -1256,7 +1256,7 @@ async fn get_issue_comments(
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
         return Err(
-            Error::NotFound.into_response("labels", "add-labels-to-an-issue")
+            Error::NOT_FOUND.into_response("labels", "add-labels-to-an-issue")
         );
     };
 
@@ -1293,14 +1293,14 @@ async fn create_issue_comment(
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(
-            Error::NotFound.into_response("issues", "create-an-issue-comments")
+            Error::NOT_FOUND.into_response("issues", "create-an-issue-comments")
         );
     };
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
         .map(|id| prs::get_issue(&tx, id))
     else {
         return Err(
-            Error::NotFound.into_response("issues", "create-an-issue-comments")
+            Error::NOT_FOUND.into_response("issues", "create-an-issue-comments")
         );
     };
 
@@ -1367,12 +1367,12 @@ async fn get_issue_comment(
 
     let Some(repo_id) = id_by_name(tx, &owner, &name) else {
         return Err(
-            Error::NotFound.into_response("issues", "get-an-issue-comment")
+            Error::NOT_FOUND.into_response("issues", "get-an-issue-comment")
         );
     };
     let Some(comment) = prs::get_comment_by_i64(tx, repo_id, comment_id) else {
         return Err(
-            Error::NotFound.into_response("issues", "get-an-issue-comment")
+            Error::NOT_FOUND.into_response("issues", "get-an-issue-comment")
         );
     };
     let issue = prs::get_issue(tx, comment.issue);
@@ -1408,13 +1408,13 @@ async fn update_issue_comment(
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(
-            Error::NotFound.into_response("issues", "update-an-issue-comment")
+            Error::NOT_FOUND.into_response("issues", "update-an-issue-comment")
         );
     };
     let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id)
     else {
         return Err(
-            Error::NotFound.into_response("issues", "update-an-issue-comment")
+            Error::NOT_FOUND.into_response("issues", "update-an-issue-comment")
         );
     };
 
@@ -1480,13 +1480,13 @@ async fn delete_issue_comment(
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(
-            Error::NotFound.into_response("issues", "delete-an-issue-comment")
+            Error::NOT_FOUND.into_response("issues", "delete-an-issue-comment")
         );
     };
     let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id)
     else {
         return Err(
-            Error::NotFound.into_response("issues", "delete-an-issue-comment")
+            Error::NOT_FOUND.into_response("issues", "delete-an-issue-comment")
         );
     };
 

@@ -49,7 +49,7 @@ async fn create_blob(
     let mut db = Source::get();
     let tx = db.token_eager();
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "create-a-blob"));
+        return Err(Error::NOT_FOUND.into_response("git", "create-a-blob"));
     };
 
     let oid = crate::model::git::store(
@@ -92,14 +92,14 @@ async fn get_blob(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "get-a-blob"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-blob"));
     };
 
     let Some(object) = git_hash::ObjectId::from_hex(blob_id.as_bytes())
         .ok()
         .and_then(|oid| crate::model::git::load(tx, repo.network, &oid))
     else {
-        return Err(Error::NotFound.into_response("git", "get-a-blob"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-blob"));
     };
     let blob = object.into_blob();
     let url =
@@ -120,7 +120,7 @@ async fn get_tree(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "get-a-tree"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-tree"));
     };
 
     // todo: invalid oid? missing tree?
@@ -130,7 +130,7 @@ async fn get_tree(
     let tree = if let Some(t) = t {
         t
     } else {
-        return Err(Error::NotFound.into_response("git", "get-a-tree"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-tree"));
     };
     let tree = tree.into_tree();
 
@@ -181,7 +181,7 @@ async fn create_tree(
     let mut db = Source::get();
     let tx = db.token_eager();
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "create-a-tree"));
+        return Err(Error::NOT_FOUND.into_response("git", "create-a-tree"));
     };
 
     // TODO: what if oid is not valid, or not in repo, or not a tree?
@@ -260,7 +260,7 @@ async fn get_commit(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "get-a-commit"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-commit"));
     };
 
     let not_found = || {
@@ -316,11 +316,11 @@ async fn create_commit(
     let tx = db.token_eager();
     // TODO: test error when trying to hit this endpoint unauth'd
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::NotFound.into_response("git", "create-a-commit"));
+        return Err(Error::NOT_FOUND.into_response("git", "create-a-commit"));
     };
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "create-a-commit"));
+        return Err(Error::NOT_FOUND.into_response("git", "create-a-commit"));
     };
 
     let default_signature = git_actor::Signature {
@@ -412,7 +412,7 @@ async fn create_ref(
     }
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "create-a-reference"));
+        return Err(Error::NOT_FOUND.into_response("git", "create-a-reference"));
     };
 
     // FIXME: should fail for "empty repository" aka repo with no branches
@@ -467,7 +467,7 @@ async fn list_refs(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "get-a-reference"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-reference"));
     };
 
     let mut refs = Vec::new();
@@ -500,13 +500,13 @@ async fn get_ref(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(repo) = crate::model::repos::by_name(tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "get-a-reference"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-reference"));
     };
 
     let refname = format!("refs/{}", ref_.as_str());
     let Some(oid) = crate::model::git::refs::resolve(tx, repo.id, &refname)
     else {
-        return Err(Error::NotFound.into_response("git", "get-a-reference"));
+        return Err(Error::NOT_FOUND.into_response("git", "get-a-reference"));
     };
 
     let obj = crate::model::git::load(tx, repo.network, &oid)
@@ -541,7 +541,7 @@ async fn update_ref(
             .into_response("git", "update-a-reference"));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NotFound.into_response("git", "update-a-reference"));
+        return Err(Error::NOT_FOUND.into_response("git", "update-a-reference"));
     };
 
     // FIXME: should fail for "empty repository" aka repo with no branches (and objects?)
@@ -682,7 +682,7 @@ async fn delete_ref(
     let tx = db.token_eager();
     let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name)
     else {
-        return Err(Error::NotFound.into_response("git", "delete-a-reference"));
+        return Err(Error::NOT_FOUND.into_response("git", "delete-a-reference"));
     };
     // FIXME: what if a PR from this ref exists?
 

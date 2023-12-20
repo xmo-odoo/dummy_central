@@ -178,18 +178,10 @@ impl IntoResponse for GHError<'_> {
             &documentation_url
         };
         match self.error {
-            Error::NotFound => (
+            Error::NotFound(message) => (
                 StatusCode::NOT_FOUND,
                 Json(GithubError {
-                    message: "Not Found".into(),
-                    documentation_url,
-                    errors: &[],
-                }),
-            ),
-            Error::NotFound2(message) => (
-                StatusCode::NOT_FOUND,
-                Json(GithubError {
-                    message: message.into(),
+                    message,
                     documentation_url,
                     errors: &[],
                 }),
@@ -224,13 +216,14 @@ impl IntoResponse for GHError<'_> {
 }
 
 enum Error<'a> {
-    NotFound,
-    NotFound2(&'a str),
+    NotFound(Cow<'a, str>),
     Unauthenticated(&'a str),
     Forbidden(&'a str),
     Unprocessable(Cow<'a, str>, &'a [GithubErrorDetails<'a>]),
 }
 impl<'e> Error<'e> {
+    const NOT_FOUND: Self = Self::NotFound(Cow::Borrowed("Not Found"));
+
     const fn unprocessable(
         m: &'e str,
         details: &'e [GithubErrorDetails<'e>],
@@ -419,7 +412,7 @@ pub fn routes(st: Config) -> Router {
         .route("/rate_limit", get(rate_limit))
         .route("/graphql", post(graphql))
         .merge(repos::routes())
-        .fallback(|| async { Error::NotFound.into_response("", "") })
+        .fallback(|| async { Error::NOT_FOUND.into_response("", "") })
         .with_state(Arc::new(st))
 }
 
@@ -483,7 +476,7 @@ async fn get_user(
     let mut db = Source::get();
     let tok = &db.token();
     crate::model::users::get_user(tok, &username)
-        .ok_or_else(|| Error::NotFound.into_response("users", "get-a-user"))
+        .ok_or_else(|| Error::NOT_FOUND.into_response("users", "get-a-user"))
         .map(
             // NOTE: works fine for API, but not web
             |u| Json(PublicUser::from(u)),
@@ -502,7 +495,7 @@ async fn get_org(
         .filter(|u| matches!(u.r#type, Type::Organization))
         .ok_or_else(|| {
             info!("{orgname} not found");
-            Error::NotFound.into_response("orgs", "get-an-organization")
+            Error::NOT_FOUND.into_response("orgs", "get-an-organization")
         })
         .map(|u| {
             info!("{orgname} found => {u:?}");
@@ -573,7 +566,7 @@ async fn create_repository(
         .then(|| u.clone())
         .or_else(|| crate::model::users::get_user(&tx, owner))
     else {
-        return Err(Error::NotFound.into_response("repos", endpoint));
+        return Err(Error::NOT_FOUND.into_response("repos", endpoint));
     };
 
     let Some(repo) = crate::model::repos::create_repository(
