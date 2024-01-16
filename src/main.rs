@@ -55,10 +55,19 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //        "github application" to be script-able / allow scenarios
     //        e.g. triggering errors on endpoints.
 
+    /* TODO:
+        tracing_subscriber::registry()
+            .with(fmt::layer())
+            .with(EnvFilter::from_default_env())
+            .init();
+
+        or something (may want to configure EnvFilter to not use RUST_LOG),
+        also add custom filters for sub-crates
+     */
     tracing::subscriber::set_global_default(
         tracing_subscriber::fmt().with_max_level(opt.log).finish(),
     )
-    .unwrap();
+    .expect("configuring tracing failed");
 
     load_users(&opt.users)?;
 

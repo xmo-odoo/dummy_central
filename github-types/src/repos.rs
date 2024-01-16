@@ -124,7 +124,7 @@ pub struct RepositoryResponse {
     pub master_branch: Option<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CreateRepositoryRequest {
     pub name: String,
     #[serde(default)]

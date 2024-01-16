@@ -50,7 +50,7 @@ struct GithubError<'a> {
     #[serde(skip_serializing_if = "<[_]>::is_empty")]
     errors: &'a [GithubErrorDetails<'a>],
 }
-#[derive(Serialize, Copy, Clone)]
+#[derive(Serialize, Copy, Clone, Debug)]
 struct GithubErrorDetails<'a> {
     resource: &'a str,
     #[serde(skip_serializing_if = "<str>::is_empty")]
@@ -159,6 +159,7 @@ impl Config {
     }
 }
 
+#[derive(Debug)]
 struct GHError<'a> {
     error: Error<'a>,
     category: &'a str,
@@ -215,6 +216,7 @@ impl IntoResponse for GHError<'_> {
     }
 }
 
+#[derive(Debug)]
 enum Error<'a> {
     NotFound(Cow<'a, str>),
     Unauthenticated(&'a str),
@@ -407,6 +409,7 @@ pub fn routes(st: Config) -> Router {
         .with_state(Arc::new(st))
 }
 
+#[instrument]
 async fn get_current_user(
     auth: Authorization,
 ) -> Result<
@@ -428,6 +431,7 @@ async fn get_current_user(
         })
 }
 
+#[instrument]
 async fn get_current_user_emails(
     auth: Authorization,
 ) -> Result<Json<Vec<Email>>, GHError<'static>> {
@@ -457,10 +461,12 @@ async fn get_current_user_emails(
 /// - 403 (forbidden) ???
 /// - 404 (not found) ???
 /// - 409 (conflict) ???
+#[instrument]
 async fn accept_invitation(Path(_invitation_id): Path<usize>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
+#[instrument]
 async fn get_user(
     Path(username): Path<String>,
 ) -> Result<Json<PublicUser>, GHError<'static>> {
@@ -474,6 +480,7 @@ async fn get_user(
         )
 }
 
+#[instrument(skip(st))]
 async fn get_org(
     State(st): State<St>,
     Path(orgname): Path<String>,
@@ -519,6 +526,7 @@ const REPO_CREATION_FAILED: Error = Error::unprocessable(
     "Repository creation failed.",
     &[Error::repo("name already exists on this account")],
 );
+#[instrument(skip(st), err(Debug, level=Level::INFO))]
 async fn create_repository(
     auth: Option<Authorization>,
     State(st): State<St>,
@@ -527,7 +535,6 @@ async fn create_repository(
 ) -> Result<Response, GHError<'static>> {
     let mut db = Source::get();
     let tx = db.token_eager();
-    let _span = span!(Level::INFO, "create-a-repository").entered();
     let owner = owner.as_deref().map_or("", |o| &**o);
     let endpoint = if owner.is_empty() {
         "create-a-repository-for-the-authenticated-user"
@@ -616,6 +623,7 @@ async fn create_repository(
     Ok(r)
 }
 
+#[instrument]
 async fn rate_limit() -> ([(&'static str, &'static str); 1], Json<RateLimit>) {
     (
         [(
@@ -657,7 +665,7 @@ impl From<ModelVisibility> for APIVisibility {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct GraphqlRequest {
     query: String,
     #[serde(default)]
@@ -716,6 +724,7 @@ the following items:
 note: for a repo there's apparently only the db id of the repo (no way!) but it
       seems to work correctly for a PR
 */
+#[instrument(skip(st))]
 async fn graphql(
     auth: Authorization,
     State(st): State<St>,
