@@ -1,6 +1,7 @@
+use serde::{Deserialize, Serialize};
+
 use super::git::Authorship;
 use super::users::SimpleUser;
-use serde::{Deserialize, Serialize};
 
 pub type License = ();
 #[derive(Serialize, Deserialize, Copy, Clone, Debug)]

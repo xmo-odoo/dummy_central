@@ -1,8 +1,9 @@
-use crate::users::SimpleUser;
 use serde::{Deserialize, Serialize};
+
 // FIXME: check that this is the one
 use super::pulls as p;
 use crate::repos::MinimalRepository;
+use crate::users::SimpleUser;
 
 #[derive(Serialize, Debug)]
 pub struct Webhook {

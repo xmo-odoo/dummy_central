@@ -1,27 +1,23 @@
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+
 use axum::extract::{Json, Path, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Router;
-use git_hash::ObjectId;
-use hex::ToHex;
-use rusqlite::OptionalExtension as _;
-use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
-use std::collections::hash_map::RandomState;
-use std::collections::{HashMap, HashSet};
-use std::convert::{TryFrom, TryInto};
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use serde::Deserialize;
 
 use github_types::repos::{CommitsResponse, HookEvent};
-use github_types::users::SimpleUser;
 use github_types::{issues::*, pulls::*, webhooks};
 
 use crate::github::repos::send_hook;
 use crate::github::{Authorization, Config, Error, GHError, St};
 use crate::model::repos::id_by_name;
 use crate::model::users::User;
-use crate::model::{prs, Source, Token};
-use prs::{find_pr, reviews, PullRequestId};
+use crate::model::{
+    prs::{self, find_pr, reviews, PullRequestId},
+    Source, Token,
+};
 
 #[derive(Debug)]
 pub struct Issue {
@@ -281,9 +277,11 @@ async fn get_pull_request(
     let tx = &db.token();
 
     let Some(pr_id) = prs::find_id(tx, &owner, &name, pull_number) else {
-        return Err(
-            Error::NOT_FOUND.into_response("pulls", "pulls", "get-a-pull-request")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "pulls",
+            "pulls",
+            "get-a-pull-request",
+        ));
     };
 
     Ok(Json(pr_response(tx, &st, pr_id)))
@@ -296,8 +294,11 @@ async fn get_pull_request_commits(
     let mut db = Source::get();
     let tx = &db.token();
     let Some(pr) = prs::find_pr(tx, &owner, &name, pull_number) else {
-        return Err(Error::NOT_FOUND
-            .into_response("pulls", "pulls", "list-commits-on-a-pull-request"));
+        return Err(Error::NOT_FOUND.into_response(
+            "pulls",
+            "pulls",
+            "list-commits-on-a-pull-request",
+        ));
     };
 
     // not entirely sure how traversal is supposed to work so... just
@@ -421,11 +422,14 @@ async fn create_pull_request(
     fn validation_failed<'a>(
         es: &'a [crate::github::GithubErrorDetails<'_>],
     ) -> GHError<'a> {
-        Error::unprocessable("Validation Failed", es)
-            .into_response("pulls", "pulls", "create-a-pull-request")
+        Error::unprocessable("Validation Failed", es).into_response(
+            "pulls",
+            "pulls",
+            "create-a-pull-request",
+        )
     }
 
-    let (base, head) = match (base, head) {
+    let (_base, head) = match (base, head) {
         (None, None) => {
             return Err(
                 validation_failed(&[base_error, head_error]).into_response()
@@ -464,7 +468,11 @@ async fn create_pull_request(
                         Error::details("PullRequest", "issue", "invalid", "");
                     deets.value = Some(issue);
                     return Err(Error::unprocessable(err, &[deets])
-                        .into_response("pulls", "pulls", "create-a-pull-request")
+                        .into_response(
+                            "pulls",
+                            "pulls",
+                            "create-a-pull-request",
+                        )
                         .into_response());
                 }
             }
@@ -503,7 +511,7 @@ async fn create_pull_request(
         },
     );
     let pr = pr_response(&tx, &st, pr_id);
-    tx.commit();
+    tx.commit().unwrap();
     Ok((http::StatusCode::CREATED, Json(pr)))
 }
 
@@ -684,7 +692,8 @@ async fn update_pull_request(
                             }),
                             body: body.as_ref().map(|_| {
                                 webhooks::Change::from(
-                                    pr.issue.body.clone().unwrap_or_default())
+                                    pr.issue.body.clone().unwrap_or_default(),
+                                )
                             }),
                             base: new_base.filter(|&b| b != &pr.base).map(
                                 |_| webhooks::PrBaseChange {
@@ -701,7 +710,7 @@ async fn update_pull_request(
         );
     }
     let pr = pr_response(&tx, &st, pr.id);
-    tx.commit();
+    tx.commit().unwrap();
     Ok(Json(pr))
 }
 
@@ -715,16 +724,25 @@ async fn create_review(
     let tx = db.token_eager();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::NOT_FOUND
-            .into_response("pulls", "reviews", "create-a-review-for-a-pull-request"));
+        return Err(Error::NOT_FOUND.into_response(
+            "pulls",
+            "reviews",
+            "create-a-review-for-a-pull-request",
+        ));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND
-            .into_response("pulls", "reviews", "create-a-review-for-a-pull-request"));
+        return Err(Error::NOT_FOUND.into_response(
+            "pulls",
+            "reviews",
+            "create-a-review-for-a-pull-request",
+        ));
     };
     let Some(pr) = prs::find_id(&tx, &owner, &name, pr) else {
-        return Err(Error::NOT_FOUND
-            .into_response("pulls", "reviews", "create-a-review-for-a-pull-request"));
+        return Err(Error::NOT_FOUND.into_response(
+            "pulls",
+            "reviews",
+            "create-a-review-for-a-pull-request",
+        ));
     };
 
     let commit_id = if let Some(cid) = req.commit_id {
@@ -767,7 +785,7 @@ async fn create_review(
         req.comments.into_iter().map(|c| c.body),
     );
 
-    tx.commit();
+    tx.commit().unwrap();
 
     let tx = &db.token();
     let repository = crate::model::repos::by_name(tx, &owner, &name).unwrap();
@@ -800,8 +818,11 @@ async fn list_reviews(
     let tx = &db.token();
 
     let Some(pr) = prs::find_id(tx, &owner, &name, pr) else {
-        return Err(Error::NOT_FOUND
-            .into_response("pulls", "reviews", "list-reviews-for-a-pull-request"));
+        return Err(Error::NOT_FOUND.into_response(
+            "pulls",
+            "reviews",
+            "list-reviews-for-a-pull-request",
+        ));
     };
 
     // TODO: pagination
@@ -932,7 +953,7 @@ async fn create_review_comment(
 
     let comment = reviews::get_comment(&tx, comments[0]);
 
-    tx.commit();
+    tx.commit().unwrap();
 
     Ok((
         http::StatusCode::CREATED,
@@ -997,13 +1018,13 @@ async fn update_review_comment(
 
     let comment = reviews::get_comment(&tx, comment_id);
 
-    tx.commit();
+    tx.commit().unwrap();
 
     Ok(Json(comment_to_response(&st.root, &owner, &name, comment)))
 }
 
 async fn delete_review_comment(
-    State(st): State<St>,
+    State(_): State<St>,
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
 ) -> Result<http::StatusCode, GHError<'static>> {
     let mut db = Source::get();
@@ -1026,7 +1047,7 @@ async fn delete_review_comment(
     };
 
     if reviews::delete_comment(&tx, comment_id) {
-        tx.commit();
+        tx.commit().unwrap();
         Ok(http::StatusCode::NO_CONTENT)
     } else {
         Err(Error::NOT_FOUND.into_response(
@@ -1045,7 +1066,11 @@ async fn get_issue(
     let tx = &db.token();
 
     let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, number) else {
-        return Err(Error::NOT_FOUND.into_response("issues", "issues", "get-an-issue"));
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "issues",
+            "get-an-issue",
+        ));
     };
 
     let issue = prs::get_issue(tx, issue_id);
@@ -1081,12 +1106,19 @@ async fn create_issue(
     let tx = db.token();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("")
-            .into_response("issues", "comments", "create-an-issue"));
+        return Err(Error::Unauthenticated("").into_response(
+            "issues",
+            "comments",
+            "create-an-issue",
+        ));
     };
 
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
-        return Err(Error::NOT_FOUND.into_response("issues", "comments", "create-an-issue"));
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "create-an-issue",
+        ));
     };
 
     let issue_id = prs::issue_create(
@@ -1097,9 +1129,8 @@ async fn create_issue(
         req.body.as_deref(),
     );
     let issue = prs::get_issue(&tx, issue_id);
-    tx.commit();
+    tx.commit().unwrap();
 
-    let tx = &db.token();
     Ok((
         http::StatusCode::CREATED,
         Json(IssueResponse {
@@ -1144,9 +1175,11 @@ async fn get_issue_labels(
 
     let Some(issue_id) = prs::find_issue_id(tx, &owner, &name, issue_number)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "labels", "list-labels-for-an-issue")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "labels",
+            "list-labels-for-an-issue",
+        ));
     };
 
     let labels = prs::get_labels(tx, issue_id, |l| {
@@ -1169,9 +1202,11 @@ async fn replace_issue_labels(
 
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "labels", "add-labels-to-an-issue")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "labels",
+            "add-labels-to-an-issue",
+        ));
     };
 
     for label in prs::get_labels(&tx, issue, |l| l.id) {
@@ -1204,9 +1239,11 @@ async fn add_issue_labels(
 
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "labels", "add-labels-to-an-issue")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "labels",
+            "add-labels-to-an-issue",
+        ));
     };
 
     for label in labels
@@ -1235,9 +1272,11 @@ async fn delete_issue_label(
 
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "labels", "add-labels-to-an-issue")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "labels",
+            "add-labels-to-an-issue",
+        ));
     };
 
     if let Some(existing) = prs::get_labels(&tx, issue, |l| l)
@@ -1264,9 +1303,11 @@ async fn get_issue_comments(
 
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "labels", "add-labels-to-an-issue")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "labels",
+            "add-labels-to-an-issue",
+        ));
     };
 
     let comments = prs::get_comments(&tx, issue, |c| {
@@ -1297,20 +1338,27 @@ async fn create_issue_comment(
     let tx = db.token_eager();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("")
-            .into_response("issues", "issues", "create-an-issue-response"));
+        return Err(Error::Unauthenticated("").into_response(
+            "issues",
+            "issues",
+            "create-an-issue-response",
+        ));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "issues", "create-an-issue-comments")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "issues",
+            "create-an-issue-comments",
+        ));
     };
     let Some(issue) = prs::find_issue_id(&tx, &owner, &name, issue_number)
         .map(|id| prs::get_issue(&tx, id))
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "issues", "create-an-issue-comments")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "issues",
+            "create-an-issue-comments",
+        ));
     };
 
     let comment_id = prs::create_comment(&tx, user.id, issue.id, &req.body);
@@ -1348,7 +1396,7 @@ async fn create_issue_comment(
             .into_response(&st.root, &owner, &name),
         })
     });
-    tx.commit();
+    tx.commit().unwrap();
 
     // should have a comment id, but how can I know what it is?
     Ok((
@@ -1375,14 +1423,18 @@ async fn get_issue_comment(
     let tx = &db.token();
 
     let Some(repo_id) = id_by_name(tx, &owner, &name) else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "comments", "get-an-issue-comment")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "get-an-issue-comment",
+        ));
     };
     let Some(comment) = prs::get_comment_by_i64(tx, repo_id, comment_id) else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "comments", "get-an-issue-comment")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "get-an-issue-comment",
+        ));
     };
     let issue = prs::get_issue(tx, comment.issue);
 
@@ -1412,19 +1464,26 @@ async fn update_issue_comment(
     let tx = db.token();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("")
-            .into_response("issues", "comments", "update-an-issue-comment"));
+        return Err(Error::Unauthenticated("").into_response(
+            "issues",
+            "comments",
+            "update-an-issue-comment",
+        ));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "comments", "update-an-issue-comment")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "update-an-issue-comment",
+        ));
     };
     let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "comments", "update-an-issue-comment")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "update-an-issue-comment",
+        ));
     };
 
     let issue = prs::get_issue(&tx, comment.issue);
@@ -1470,7 +1529,7 @@ async fn update_issue_comment(
                 .into_response(&st.root, &owner, &name),
         })
     });
-    tx.commit();
+    tx.commit().unwrap();
 
     Ok(Json(issue_comment.into_response(&st.root, &owner, &name)))
 }
@@ -1484,19 +1543,26 @@ async fn delete_issue_comment(
     let tx = db.token();
 
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("")
-            .into_response("issues", "comments", "delete-an-issue-comment"));
+        return Err(Error::Unauthenticated("").into_response(
+            "issues",
+            "comments",
+            "delete-an-issue-comment",
+        ));
     };
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "comments", "delete-an-issue-comment")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "delete-an-issue-comment",
+        ));
     };
     let Some(comment) = prs::get_comment_by_i64(&tx, repo.id, comment_id)
     else {
-        return Err(
-            Error::NOT_FOUND.into_response("issues", "comments", "delete-an-issue-comment")
-        );
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "comments",
+            "delete-an-issue-comment",
+        ));
     };
 
     let issue = prs::get_issue(&tx, comment.issue);
@@ -1538,6 +1604,6 @@ async fn delete_issue_comment(
             .into_response(&st.root, &owner, &name),
         })
     });
-    tx.commit();
+    tx.commit().unwrap();
     Ok(http::StatusCode::NO_CONTENT)
 }

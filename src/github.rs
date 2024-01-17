@@ -1,6 +1,10 @@
 /*!
 # Straight pseudo-github implementation.
  */
+use std::borrow::Cow;
+use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
+
 use axum::extract::{FromRequestParts, Path, State};
 use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
@@ -8,20 +12,12 @@ use axum::routing::{get, patch, post};
 use axum::{async_trait, Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use git_object::bstr::{BStr, BString};
-use git_object::Blob;
 use hmac::{Hmac, Mac};
-use hyper::header::{AUTHORIZATION, CONTENT_TYPE};
+use hyper::header::AUTHORIZATION;
 use hyper::StatusCode;
-use rusqlite::OptionalExtension;
 use serde::{Deserialize, Serialize};
-use serde_json::Deserializer;
 use sha1::Sha1;
 use sha2::Sha256;
-use std::borrow::Cow;
-use std::collections::{HashMap, HashSet};
-use std::io::Read;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
-use std::time::Instant;
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
@@ -31,13 +27,11 @@ use github_types::orgs::OrganizationFull;
 use github_types::repos::{
     CreateRepositoryRequest, HookContentType, RepositoryResponse,
 };
-use github_types::users::{
-    Email, PublicUser, SimpleUser, UserType, Visibility,
-};
+use github_types::users::{Email, PublicUser, SimpleUser, UserType};
 use github_types::webhooks::{self, Webhook};
-use github_types::{Core, RateLimit, Resource};
+use github_types::RateLimit;
 
-use crate::model::repos::{Repository, RepositoryId};
+use crate::model::repos::Repository;
 use crate::model::users::{find_current_user, list_user_emails, User};
 use crate::model::{Source, Token};
 
@@ -345,12 +339,12 @@ where
 
     async fn from_request_parts(
         parts: &mut Parts,
-        state: &S,
+        _state: &S,
     ) -> Result<Self, Self::Rejection> {
         parts
             .headers
             .get(AUTHORIZATION)
-            .and_then(|mut h| {
+            .and_then(|h| {
                 let h = h.to_str().ok()?;
                 // auth-scheme SP data
                 if let Some(h) = h.strip_prefix("token ") {
@@ -420,8 +414,11 @@ async fn get_current_user(
     let tx = &db.token();
     auth_to_user(tx, auth)
         .ok_or_else(|| {
-            Error::Unauthenticated("Requires authentication")
-                .into_response("users", "users", "get-the-authenticated-user")
+            Error::Unauthenticated("Requires authentication").into_response(
+                "users",
+                "users",
+                "get-the-authenticated-user",
+            )
         })
         .map(|u| {
             (
@@ -439,8 +436,11 @@ async fn get_current_user_emails(
     let tx = &db.token();
     auth_to_user(tx, auth)
         .ok_or_else(|| {
-            Error::Unauthenticated("Requires authentication")
-                .into_response("users", "users", "get-the-authenticated-user")
+            Error::Unauthenticated("Requires authentication").into_response(
+                "users",
+                "users",
+                "get-the-authenticated-user",
+            )
         })
         .map(|u| {
             Json(
@@ -473,7 +473,9 @@ async fn get_user(
     let mut db = Source::get();
     let tok = &db.token();
     crate::model::users::get_user(tok, &username)
-        .ok_or_else(|| Error::NOT_FOUND.into_response("users", "users", "get-a-user"))
+        .ok_or_else(|| {
+            Error::NOT_FOUND.into_response("users", "users", "get-a-user")
+        })
         .map(
             // NOTE: works fine for API, but not web
             |u| Json(PublicUser::from(u)),
@@ -493,7 +495,11 @@ async fn get_org(
         .filter(|u| matches!(u.r#type, Type::Organization))
         .ok_or_else(|| {
             info!("{orgname} not found");
-            Error::NOT_FOUND.into_response("orgs", "orgs", "get-an-organization")
+            Error::NOT_FOUND.into_response(
+                "orgs",
+                "orgs",
+                "get-an-organization",
+            )
         })
         .map(|u| {
             info!("{orgname} found => {u:?}");
@@ -570,7 +576,9 @@ async fn create_repository(
     let Some(repo) = crate::model::repos::create_repository(
         &tx, u.id, owner.id, &name, None,
     ) else {
-        return Err(REPO_CREATION_FAILED.into_response("repos", "repos", endpoint));
+        return Err(
+            REPO_CREATION_FAILED.into_response("repos", "repos", endpoint)
+        );
     };
 
     info!("Created repository {}/{}", owner.login, name);

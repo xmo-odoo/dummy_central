@@ -1,7 +1,8 @@
+use std::borrow::Cow;
+
 use chrono::{DateTime, FixedOffset, NaiveDateTime, SecondsFormat};
 use git_object::Kind;
 use serde::{Deserialize, Serialize};
-use std::borrow::Cow;
 
 // FIXME: decorrelate internal authorship model from over the wire, so date is not optional
 #[derive(Deserialize, Serialize, Clone, Debug)]

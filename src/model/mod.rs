@@ -1,10 +1,8 @@
+use std::ops::Deref;
+
 use github_types::repos::StatusState;
 use once_cell::sync::Lazy;
-use rusqlite::{OpenFlags as of, Transaction};
-use std::{
-    ops::{Deref, DerefMut},
-    sync::atomic::{AtomicUsize, Ordering},
-};
+use rusqlite::Transaction;
 
 pub mod git;
 pub mod prs;

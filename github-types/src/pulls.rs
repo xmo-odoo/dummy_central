@@ -1,7 +1,8 @@
-use crate::users::SimpleUser;
 use serde::{Deserialize, Serialize};
+
 // FIXME: circular dependency
 use super::issues::{AuthorAssociation, IssueState, Label};
+use crate::users::SimpleUser;
 
 #[derive(Serialize, Debug)]
 pub struct PullRequestResponse {

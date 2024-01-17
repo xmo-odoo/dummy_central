@@ -275,7 +275,7 @@ pub struct Comment {
 
 pub fn get_comment_by_i64(
     tx: &Token,
-    repo: RepositoryId,
+    _repo: RepositoryId,
     comment: i64,
 ) -> Option<Comment> {
     // fixme: repo
@@ -588,7 +588,7 @@ pub fn set_base(tx: &Token, pr: PullRequestId, base: &str) {
 
 pub mod reviews {
     use rusqlite::{
-        types::{FromSqlError, ToSqlOutput, ValueRef},
+        types::{FromSqlError, ToSqlOutput},
         OptionalExtension,
     };
 
@@ -764,7 +764,7 @@ pub mod reviews {
 
     pub fn comment_by_i64(
         tx: &Token,
-        repo_id: crate::model::repos::RepositoryId,
+        _repo_id: crate::model::repos::RepositoryId,
         comment_id: i64,
     ) -> Option<ReviewCommentId> {
         tx.query_row(

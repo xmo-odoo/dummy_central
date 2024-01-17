@@ -1,4 +1,4 @@
-use std::collections::{hash_map::RandomState, HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 
 use git_actor::Signature;
 use git_diff::tree::{recorder::Change, Changes, Recorder, State};
@@ -7,13 +7,10 @@ use git_object::{
     bstr::BStr, tree::Entry, Commit, CommitRef, Kind, Object, ObjectRef,
     TagRef, Tree, TreeRefIter,
 };
-use rusqlite::{types::ValueRef, OptionalExtension};
+use rusqlite::OptionalExtension;
 use sha1::{Digest, Sha1};
 
-use super::{
-    repos::{Network, RepositoryId},
-    Token,
-};
+use super::{repos::Network, Token};
 
 /// git_object's `loose_header` const size, not sure why 28 (I count about 12)
 const HEADER_SIZE: usize = 28;
@@ -279,7 +276,7 @@ pub fn find_blob(
     path: &str,
     mut entries: Vec<Entry>,
 ) -> Option<(ObjectId, git_object::Blob)> {
-    'path: for p in path.split('/') {
+    for p in path.split('/') {
         let entry = std::mem::take(&mut entries)
             .into_iter()
             .find(|e| e.filename == BStr::new(p.as_bytes()))?;
@@ -417,7 +414,7 @@ pub fn merge(
         .and_then(|o| o.try_into_tree().ok())
         .expect("we just got it!");
 
-    for (path, change) in updates {
+    for (_path, change) in updates {
         match change {
             Change::Addition {
                 entry_mode,
@@ -432,15 +429,15 @@ pub fn merge(
                 });
             }
             Change::Deletion {
-                entry_mode,
-                oid,
+                entry_mode: _,
+                oid: _,
                 path,
             } => {
                 // todo: validate that the suppression worked (?)
                 new_tree.entries.retain(|e| e.filename != path);
             }
             Change::Modification {
-                previous_entry_mode,
+                previous_entry_mode: _,
                 previous_oid,
                 entry_mode,
                 oid,
@@ -485,7 +482,7 @@ fn get_tree_in<'buf>(
     tx: &Token,
     network: Network,
     oid: &oid,
-    mut buf: &'buf mut Vec<u8>,
+    buf: &'buf mut Vec<u8>,
 ) -> Result<TreeRefIter<'buf>, MergeError> {
     get_in(tx, network, oid, &mut *buf)
         .ok_or(MergeError::NotFound)

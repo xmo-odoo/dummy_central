@@ -1,8 +1,9 @@
+use std::borrow::Cow;
+
 use rusqlite::{
     types::{FromSql, FromSqlError, FromSqlResult, ValueRef},
     OptionalExtension as _,
 };
-use std::borrow::Cow;
 
 use super::{Result, Source, Token};
 

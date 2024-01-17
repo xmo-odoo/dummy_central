@@ -1,20 +1,19 @@
-#![allow(unused)]
+#![allow(dead_code)]
+
+use std::collections::HashMap;
+use std::fs;
+use std::io::{self, Write};
+use std::net::SocketAddr;
+use std::net::TcpListener;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use bytes::Bytes;
 use http::header::{HeaderName, HeaderValue};
 use hyper::Server;
 use serde::Deserialize;
 use serde_json::Deserializer;
-use std::collections::HashMap;
-use std::fs;
-use std::io::{self, Read, Write};
-use std::net::SocketAddr;
-use std::net::TcpListener;
-use std::path::{Path, PathBuf};
-use std::sync::{Arc, RwLock};
-use std::time::Duration;
 use structopt::*;
-use tower::MakeService;
 use tower::{make::Shared, ServiceBuilder};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::{
@@ -56,14 +55,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     //        e.g. triggering errors on endpoints.
 
     /* TODO:
-        tracing_subscriber::registry()
-            .with(fmt::layer())
-            .with(EnvFilter::from_default_env())
-            .init();
+       tracing_subscriber::registry()
+           .with(fmt::layer())
+           .with(EnvFilter::from_default_env())
+           .init();
 
-        or something (may want to configure EnvFilter to not use RUST_LOG),
-        also add custom filters for sub-crates
-     */
+       or something (may want to configure EnvFilter to not use RUST_LOG),
+       also add custom filters for sub-crates
+    */
     tracing::subscriber::set_global_default(
         tracing_subscriber::fmt().with_max_level(opt.log).finish(),
     )
@@ -106,7 +105,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         write!(f, "{}", addr.port())?;
         f.flush()?;
     }
-    tokio::join![
+    let _ = tokio::join![
         Server::from_tcp(listener)?.serve(Shared::new(handler)),
         webhooks
     ];

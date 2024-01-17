@@ -1,3 +1,7 @@
+use std::collections::HashMap;
+use std::io::{BufRead, BufReader, Read, Write};
+use std::ops::BitOr;
+
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
@@ -9,24 +13,14 @@ use flate2::{Compression, FlushDecompress};
 use git_features::decode::leb64_from_read;
 use git_hash::ObjectId;
 use git_object::{Data, Kind, ObjectRef, WriteTo};
-use git_pack::data::input::{
-    BytesToEntriesIter, EntryDataMode, LookupRefDeltaObjectsIter, Mode,
-};
+use git_pack::data::input::{BytesToEntriesIter, EntryDataMode, Mode};
 use git_pack::data::output::bytes::FromEntriesIter;
 use git_pack::data::output::{Count, Entry as PackEntry};
 use git_pack::data::Version;
 use headers::HeaderMap;
-use http::StatusCode;
-use std::collections::HashMap;
-use std::io::{BufRead, BufReader, Read, Write};
-use std::ops::BitOr;
-use std::sync::RwLock;
 
-use crate::github::{Authorization, Error, St};
-use crate::model::users::find_current_user;
+use crate::github::{Authorization, St};
 use crate::model::Source;
-
-pub use github_types::git::*;
 
 pub fn routes() -> Router<St> {
     // FIXME: add middleware because parent may extract the repo name w/
@@ -111,7 +105,7 @@ fn write_ref<W: std::io::Write>(
 
 async fn git_refs(
     auth: Option<Authorization>,
-    State(st): State<St>,
+    State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
     headers: HeaderMap,
     q: Option<Query<Service>>,
@@ -188,7 +182,7 @@ enum Sideband {
     Error = 3,
 }
 async fn git_upload_pack(
-    State(st): State<St>,
+    State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
     let mut db = Source::get();
@@ -228,8 +222,10 @@ async fn git_upload_pack(
         git_hash::Kind::Sha1,
     );
 
-    for _ in entries_writer.by_ref() {}
-    let hash = entries_writer.digest().expect("iteration should be done");
+    for e in entries_writer.by_ref() {
+        e.unwrap();
+    }
+    entries_writer.digest().expect("iteration should be done");
 
     assert!(
         pack.len() < 65000,
@@ -239,7 +235,8 @@ async fn git_upload_pack(
     let mut response = Vec::with_capacity(pack.len() + 100);
     response.extend(b"0008NAK\n");
 
-    write!(&mut response, "{:04x}", 4 + 1 + pack.len());
+    write!(&mut response, "{:04x}", 4 + 1 + pack.len())
+        .expect("writing to a vec should always work");
     response.push(Sideband::Data as _);
     response.extend(pack);
     response.extend(b"0000");
@@ -407,7 +404,7 @@ fn load_pack_data(
         return;
     }
     // PACK(data)
-    let mut entries = BytesToEntriesIter::new_from_header(
+    let entries = BytesToEntriesIter::new_from_header(
         r,
         Mode::Verify,
         EntryDataMode::Keep,
@@ -416,7 +413,6 @@ fn load_pack_data(
     .unwrap();
     let mut entries_offset_cache = HashMap::<_, ObjectId>::new();
     let mut entry_buf = Vec::new();
-    let mut copy_spec_buf = [0u8; 7];
     let mut parent_buf = Vec::new();
     for entry in entries {
         let entry = entry.expect("Could not decode entry");
@@ -428,7 +424,7 @@ fn load_pack_data(
             git_pack::data::entry::Header::Tree => (Kind::Tree, false),
             git_pack::data::entry::Header::Blob => (Kind::Blob, false),
             git_pack::data::entry::Header::Tag => (Kind::Tag, false),
-            git_pack::data::entry::Header::RefDelta { base_id } => {
+            git_pack::data::entry::Header::RefDelta { base_id: _ } => {
                 todo!("Implement unpacking of ref-delta entries");
             }
             git_pack::data::entry::Header::OfsDelta { base_distance } => {
@@ -444,7 +440,7 @@ fn load_pack_data(
                 .unwrap();
                 let mut inflater = ZlibDecoder::new(&compressed[..]);
                 // first I have the size of the base object and the size of the new object (?)
-                let (base_length, _) = leb64_from_read(&mut inflater).unwrap();
+                let (_base_length, _) = leb64_from_read(&mut inflater).unwrap();
                 let (new_length, _) = leb64_from_read(&mut inflater).unwrap();
 
                 entry_buf.reserve(new_length as usize);
@@ -472,6 +468,7 @@ fn load_pack_data(
                         let bytes = command.count_ones() - 1;
                         // spec is $bytes bytes, providing up to 4 bytes of
                         // offset into the base and up to 3 bytes of length
+                        let mut copy_spec_buf = [0u8; 7];
                         let spec = &mut copy_spec_buf[..bytes as _];
                         inflater.read_exact(spec).unwrap();
                         let mut spec = spec.iter();

@@ -1,5 +1,6 @@
-use crate::users::SimpleUser;
 use serde::{Deserialize, Serialize};
+
+use crate::users::SimpleUser;
 
 #[derive(Debug, Serialize, Deserialize, Copy, Clone)]
 #[serde(rename_all = "snake_case")]

@@ -1,5 +1,6 @@
-use super::users::UserType;
 use serde::Serialize;
+
+use super::users::UserType;
 
 // not actually full, there's a bunch of fields which are only for
 // logged users with enough rights but that's not really reflected in
