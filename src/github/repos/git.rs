@@ -8,6 +8,7 @@ use base64::prelude::{Engine as _, BASE64_STANDARD};
 use git_object::bstr::ByteSlice;
 use git_object::tree::{Entry as TreeEntry, EntryMode};
 use git_object::{Kind, WriteTo as _};
+use tracing::instrument;
 
 pub use github_types::git::*;
 use github_types::repos::HookEvent;
@@ -32,6 +33,7 @@ pub fn routes() -> Router<St> {
         .route("/refs/*refname", get(get_ref).patch(update_ref).delete(delete_ref))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_blob(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -80,6 +82,7 @@ fn gh_base64_encode(data: &[u8]) -> String {
     }
     s
 }
+#[instrument(skip(st), err(Debug))]
 async fn get_blob(
     State(st): State<St>,
     Path((owner, name, blob_id)): Path<(String, String, String)>,
@@ -115,6 +118,7 @@ async fn get_blob(
     }))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_tree(
     State(st): State<St>,
     Path((owner, name, tree_id)): Path<(String, String, String)>,
@@ -184,6 +188,7 @@ async fn get_tree(
     }))
 }
 
+#[instrument(err(Debug))]
 async fn create_tree(
     State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -268,6 +273,7 @@ async fn create_tree(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_commit(
     State(st): State<St>,
     Path((owner, name, cid)): Path<(String, String, String)>,
@@ -325,6 +331,7 @@ async fn get_commit(
     }))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_commit(
     auth: Authorization,
     State(st): State<St>,
@@ -415,6 +422,7 @@ async fn create_commit(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_ref(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -489,6 +497,7 @@ async fn create_ref(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn list_refs(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -528,6 +537,7 @@ async fn list_refs(
     Ok(Json(refs))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_ref(
     State(st): State<St>,
     Path((owner, name, ref_)): Path<(String, String, String)>,
@@ -570,6 +580,7 @@ async fn get_ref(
     }))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn update_ref(
     auth: Authorization,
     State(st): State<St>,
@@ -731,6 +742,7 @@ pub fn find_and_update_pr(
     }
 }
 
+#[instrument(err(Debug))]
 async fn delete_ref(
     State(_): State<St>,
     Path((owner, name, ref_)): Path<(String, String, String)>,

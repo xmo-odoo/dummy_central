@@ -132,7 +132,7 @@ pub struct CreateRepositoryRequest {
     pub auto_init: bool,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct UpdateRepository {
     #[serde(default)]
     pub name: Option<String>,
@@ -169,7 +169,7 @@ pub enum CombinedCommitStatusState {
     /// If any of the contexts is [`StatusState::Error`] or [`StatusState::Failure`].
     Failure,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CreateContentsRequest {
     /// The commit message.
     pub message: String,
@@ -217,12 +217,12 @@ pub struct Content {
     pub git_url: Option<String>,
     pub download_url: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct Tree {
     pub sha: String,
     pub url: Option<String>,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct CommitLink {
     // FIXME: not actually nullable?
     pub url: Option<String>,
@@ -244,7 +244,7 @@ pub struct Commit {
 }
 
 // I really only care about the `commit` bit anyway
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct CommitsResponse {
     pub url: String,
     pub sha: String,
@@ -276,7 +276,7 @@ pub struct CommitsResponse {
     */
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct CommitsResponseCommit {
     pub url: String,
     pub author: Option<Authorship>,
@@ -293,7 +293,7 @@ fn default_hook_name() -> String {
 fn default_true() -> bool {
     true
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CreateHook {
     /// Use `web` to create a webhook. This parameter
     /// only accepts the value `web`.
@@ -308,7 +308,7 @@ pub struct CreateHook {
     #[serde(default = "default_true")]
     pub active: bool,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct UpdateHook {
     // FIXME: config (nb: url is probably optional), events (nothing if
     // empty?), add/remove (what happens if all events, add, and remove?)
@@ -317,7 +317,7 @@ pub struct UpdateHook {
     #[serde(default)]
     pub config: Option<UpdateHookConfig>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct UpdateHookConfig {
     #[serde(default)]
     pub secret: Option<String>,
@@ -513,7 +513,7 @@ pub struct CreateStatusResponse {
 // FIXME: there are at least 3 different representations of the repo
 pub type MinimalRepository = RepositoryResponse;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CreateBranchMerge {
     pub base: String,
     pub head: String,

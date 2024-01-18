@@ -13,6 +13,7 @@ use git_object::bstr::ByteSlice;
 use http::StatusCode;
 use serde::Deserialize;
 use smallvec::SmallVec;
+use tracing::instrument;
 
 use github_types::repos::*;
 use github_types::webhooks::{Webhook, WebhookEvent};
@@ -162,6 +163,7 @@ pub fn routes() -> Router<St> {
         .nest("/:owner/:name", git_protocol::routes())
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_repository(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -179,6 +181,7 @@ async fn get_repository(
     }
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn update_repository(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -228,6 +231,7 @@ async fn update_repository(
     Ok(Json(response))
 }
 
+#[instrument(err(Debug))]
 async fn delete_repository(
     State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -249,6 +253,7 @@ async fn delete_repository(
     }
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_fork(
     auth: Authorization,
     State(st): State<St>,
@@ -368,6 +373,7 @@ async fn create_fork(
     Ok((StatusCode::ACCEPTED, Json(new_repo)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn list_hooks(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -424,6 +430,7 @@ async fn list_hooks(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_hook(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -495,6 +502,7 @@ async fn create_hook(
     Ok((StatusCode::CREATED, Json(hook)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn update_hook(
     State(st): State<St>,
     Path((owner, name, hook_id)): Path<(String, String, i64)>,
@@ -545,9 +553,10 @@ async fn update_hook(
     Ok(Json(hook))
 }
 
+#[instrument(err(Debug))]
 async fn delete_hook(
     State(_): State<St>,
-    Path((_, _, hook_id)): Path<(String, String, i64)>,
+    Path((owner, name, hook_id)): Path<(String, String, i64)>,
 ) -> Result<StatusCode, StatusCode> {
     let mut db = Source::get();
     let tx = db.token();
@@ -566,7 +575,7 @@ fn default_page() -> usize {
 fn default_per_page() -> usize {
     30
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct ListCommitQuery {
     sha: Option<String>,
     #[serde(default = "default_page")]
@@ -574,6 +583,7 @@ struct ListCommitQuery {
     #[serde(default = "default_per_page")]
     per_page: usize,
 }
+#[instrument(skip(st), err(Debug))]
 async fn list_commits(
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -666,6 +676,7 @@ async fn commits_query(
         .map(|r| r.into_response())
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_commit(
     State(st): State<St>,
     Path((owner, name, commit_ref)): Path<(String, String, String)>,
@@ -733,6 +744,7 @@ async fn get_commit(
     ))))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_status(
     State(st): State<St>,
     Path((owner, name, commit_ref)): Path<(String, String, String)>,
@@ -794,6 +806,7 @@ async fn get_status(
     }))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_or_update_contents(
     auth: Authorization,
     State(st): State<St>,
@@ -984,6 +997,7 @@ async fn create_or_update_contents(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_status(
     auth: Authorization,
     State(st): State<St>,
@@ -1075,6 +1089,7 @@ async fn create_status(
     }))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_branch_merge(
     auth: Authorization,
     State(st): State<St>,
@@ -1188,14 +1203,17 @@ async fn create_branch_merge(
     }
 }
 
+#[instrument]
 async fn create_deployment() -> (StatusCode, Json<Deployment>) {
     (StatusCode::CREATED, Json(Deployment { id: 1 }))
 }
 
+#[instrument]
 async fn create_deployment_status() -> StatusCode {
     StatusCode::CREATED
 }
 
+#[instrument(err(Debug))]
 async fn list_collaborators(
     State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -1251,6 +1269,7 @@ async fn list_collaborators(
 ///   collaborator) is added
 /// - 403 (forbidden) ???
 /// - 422 (validation failed) ???
+#[instrument(err(Debug))]
 async fn add_collaborator(
     State(_): State<St>,
     Path((owner, name, new_collaborator)): Path<(String, String, String)>,

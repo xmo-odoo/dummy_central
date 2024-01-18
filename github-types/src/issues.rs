@@ -83,7 +83,7 @@ pub struct IssueResponse {
     // timeline_url???
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct IssueCreate {
     // TODO: or number, wtf does that do?
     pub title: String,
@@ -124,7 +124,7 @@ pub struct IssueCommentResponse {
     // reactions: Reactions,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CommentCreate {
     pub body: String,
 }

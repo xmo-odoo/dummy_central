@@ -23,6 +23,7 @@ use tower_http::{
     LatencyUnit,
 };
 use tracing::*;
+use tracing_subscriber::fmt::format::FmtSpan;
 
 mod github;
 mod model;
@@ -63,10 +64,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
        or something (may want to configure EnvFilter to not use RUST_LOG),
        also add custom filters for sub-crates
     */
-    tracing::subscriber::set_global_default(
-        tracing_subscriber::fmt().with_max_level(opt.log).finish(),
-    )
-    .expect("configuring tracing failed");
+    tracing_subscriber::fmt()
+        .compact()
+        .with_span_events(FmtSpan::NEW | FmtSpan::CLOSE)
+        .with_max_level(opt.log)
+        .init();
 
     load_users(&opt.users)?;
 

@@ -105,7 +105,7 @@ pub struct PullRequestBase {
     // pub user: User
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct PullRequestCreate {
     pub head: String,
     pub base: String,
@@ -162,7 +162,7 @@ where
     }))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CreateReviewRequest {
     pub body: String,
     #[serde(default)]
@@ -173,7 +173,7 @@ pub struct CreateReviewRequest {
     #[serde(default)]
     pub comments: Vec<ReviewComment>,
 }
-#[derive(Serialize, Deserialize, Copy, Clone)]
+#[derive(Serialize, Deserialize, Copy, Clone, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum CreateReviewState {
     Approve,
@@ -247,7 +247,7 @@ impl TryFrom<&String> for ReviewState {
     }
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ReviewComment {
     pub body: String,
     // FIXME: should only be optional for in_reply_to
@@ -256,7 +256,7 @@ pub struct ReviewComment {
     #[serde(flatten)]
     pub _position: ReviewCommentPosition,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(untagged)]
 pub enum ReviewCommentPosition {
     /// Comment is a reply to an existing comment rather than a top-level
@@ -272,7 +272,7 @@ pub enum ReviewCommentPosition {
         _start: Option<ReviewCommentStart>,
     },
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct ReviewCommentStart {
     // TODO: what happens if this is different than `position`
     #[serde(rename = "start_position")]
@@ -280,14 +280,14 @@ pub struct ReviewCommentStart {
     #[serde(rename = "start_line")]
     pub line: usize,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum ReviewCommentSide {
     Left,
     Right,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct CreateReviewCommentRequest {
     // does this really make sense if `InReplyTo`?
     #[serde(default)]
@@ -295,7 +295,7 @@ pub struct CreateReviewCommentRequest {
     #[serde(flatten)]
     pub _comment: ReviewComment,
 }
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct ReviewCommentResponse {
     pub id: i64,
     pub pull_request_review_id: Option<i64>,
@@ -306,7 +306,7 @@ pub struct ReviewCommentResponse {
     pub created_at: String,
     pub updated_at: String,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct UpdateReviewCommentRequest {
     pub body: String,
 }

@@ -18,6 +18,7 @@ use git_pack::data::output::bytes::FromEntriesIter;
 use git_pack::data::output::{Count, Entry as PackEntry};
 use git_pack::data::Version;
 use headers::HeaderMap;
+use tracing::instrument;
 
 use crate::github::{Authorization, St};
 use crate::model::Source;
@@ -35,6 +36,7 @@ pub fn routes() -> Router<St> {
         .route("/objects/:s/:ha", get(get_object))
 }
 
+#[instrument(err(Debug))]
 async fn get_head(
     _: Option<Authorization>,
     State(_): State<St>,
@@ -48,6 +50,7 @@ async fn get_head(
         .ok_or(http::StatusCode::NOT_FOUND)
 }
 
+#[instrument(err(Debug))]
 async fn get_object(
     _: Option<Authorization>,
     State(_): State<St>,
@@ -76,7 +79,7 @@ async fn get_object(
         .or(Err(http::StatusCode::BAD_REQUEST))
 }
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, Debug)]
 struct Service {
     service: String,
 }
@@ -103,6 +106,7 @@ fn write_ref<W: std::io::Write>(
     )
 }
 
+#[instrument(err(Debug))]
 async fn git_refs(
     auth: Option<Authorization>,
     State(_): State<St>,
@@ -181,6 +185,8 @@ enum Sideband {
     Progress = 2,
     Error = 3,
 }
+
+#[instrument]
 async fn git_upload_pack(
     State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -248,6 +254,7 @@ async fn git_upload_pack(
         .into_response()
 }
 
+#[instrument(skip(st))]
 async fn git_receive_pack(
     auth: Authorization,
     State(st): State<St>,

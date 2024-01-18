@@ -154,12 +154,12 @@ pub enum BlobResponse {
     },
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct TreeCreation {
     pub tree: Vec<Entry>,
     pub base_tree: Option<String>,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct Entry {
     /// the file referenced in the tree
     /// TODO: check if that's a filename or a path
@@ -170,14 +170,14 @@ pub struct Entry {
     #[serde(flatten)]
     pub item: Item,
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Item {
     Blob(BlobItem),
     Commit { sha: String },
     Tree { sha: String },
 }
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 #[serde(untagged)]
 pub enum BlobItem {
     Content { content: String },
@@ -210,7 +210,7 @@ pub struct CommitReq {
     pub committer: Option<Authorship>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 pub struct RefReq {
     pub sha: String,
     /// fully qualified reference, must contain at least two `/` (and start with refs?)

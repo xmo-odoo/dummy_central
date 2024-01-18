@@ -6,6 +6,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{delete, get, post};
 use axum::Router;
 use serde::Deserialize;
+use tracing::instrument;
 
 use github_types::repos::{CommitsResponse, HookEvent};
 use github_types::{issues::*, pulls::*, webhooks};
@@ -269,6 +270,7 @@ pub fn pr_response(
     }
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_pull_request(
     State(st): State<St>,
     Path((owner, name, pull_number)): Path<(String, String, usize)>,
@@ -287,6 +289,7 @@ async fn get_pull_request(
     Ok(Json(pr_response(tx, &st, pr_id)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_pull_request_commits(
     State(st): State<St>,
     Path((owner, name, pull_number)): Path<(String, String, usize)>,
@@ -365,6 +368,7 @@ async fn get_pull_request_commits(
     Ok(Json(pr_commits))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_pull_request(
     auth: Option<Authorization>,
     State(st): State<St>,
@@ -515,6 +519,7 @@ async fn create_pull_request(
     Ok((http::StatusCode::CREATED, Json(pr)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn update_pull_request(
     auth: Authorization,
     State(st): State<St>,
@@ -714,6 +719,7 @@ async fn update_pull_request(
     Ok(Json(pr))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_review(
     auth: Authorization,
     State(st): State<St>,
@@ -810,6 +816,7 @@ async fn create_review(
     Ok((http::StatusCode::CREATED, Json(review)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn list_reviews(
     State(st): State<St>,
     Path((owner, name, pr)): Path<(String, String, usize)>,
@@ -874,6 +881,7 @@ fn comment_to_response(
     }
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn list_review_comments(
     State(st): State<St>,
     Path((owner, name, pr_number, review_id)): Path<(
@@ -910,6 +918,7 @@ async fn list_review_comments(
     Ok(Json(comments))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn list_pr_comments(
     State(st): State<St>,
     Path((owner, name, pr_number)): Path<(String, String, usize)>,
@@ -932,6 +941,7 @@ async fn list_pr_comments(
     Ok(Json(comments))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_review_comment(
     State(st): State<St>,
     Path((owner, name, pr_number)): Path<(String, String, usize)>,
@@ -962,6 +972,7 @@ async fn create_review_comment(
 }
 
 // TODO: what happens for review comments of reviews?
+#[instrument(skip(st), err(Debug))]
 async fn get_review_comment(
     State(st): State<St>,
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
@@ -990,6 +1001,7 @@ async fn get_review_comment(
     Ok(Json(comment_to_response(&st.root, &owner, &name, comment)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn update_review_comment(
     State(st): State<St>,
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
@@ -1023,6 +1035,7 @@ async fn update_review_comment(
     Ok(Json(comment_to_response(&st.root, &owner, &name, comment)))
 }
 
+#[instrument(err(Debug))]
 async fn delete_review_comment(
     State(_): State<St>,
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
@@ -1058,6 +1071,7 @@ async fn delete_review_comment(
     }
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_issue(
     State(st): State<St>,
     Path((owner, name, number)): Path<(String, String, usize)>,
@@ -1096,6 +1110,7 @@ async fn get_issue(
     Ok(Json(response))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_issue(
     auth: Authorization,
     State(st): State<St>,
@@ -1166,6 +1181,7 @@ fn label_to_label(
         color: label.color,
     }
 }
+#[instrument(skip(st), err(Debug))]
 async fn get_issue_labels(
     State(st): State<St>,
     Path((owner, name, issue_number)): Path<(String, String, usize)>,
@@ -1188,10 +1204,11 @@ async fn get_issue_labels(
     Ok(Json(labels))
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Debug)]
 struct Labels {
     labels: Vec<String>,
 }
+#[instrument(skip(st), err(Debug))]
 async fn replace_issue_labels(
     State(st): State<St>,
     Path((owner, name, issue_number)): Path<(String, String, usize)>,
@@ -1229,6 +1246,7 @@ async fn replace_issue_labels(
 }
 
 // fixme: does this return just the new labels, or all the labels?
+#[instrument(skip(st), err(Debug))]
 async fn add_issue_labels(
     State(st): State<St>,
     Path((owner, name, issue_number)): Path<(String, String, usize)>,
@@ -1262,6 +1280,7 @@ async fn add_issue_labels(
     Ok(Json(labels))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn delete_issue_label(
     State(st): State<St>,
     Path((owner, name, issue_number)): Path<(String, String, usize)>,
@@ -1294,6 +1313,7 @@ async fn delete_issue_label(
     Ok(Json(labels))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_issue_comments(
     State(st): State<St>,
     Path((owner, name, issue_number)): Path<(String, String, usize)>,
@@ -1328,6 +1348,7 @@ async fn get_issue_comments(
     Ok(Json(comments))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn create_issue_comment(
     auth: Authorization,
     State(st): State<St>,
@@ -1415,6 +1436,7 @@ async fn create_issue_comment(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn get_issue_comment(
     State(st): State<St>,
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
@@ -1454,6 +1476,7 @@ async fn get_issue_comment(
     ))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn update_issue_comment(
     auth: Authorization,
     State(st): State<St>,
@@ -1534,6 +1557,7 @@ async fn update_issue_comment(
     Ok(Json(issue_comment.into_response(&st.root, &owner, &name)))
 }
 
+#[instrument(skip(st), err(Debug))]
 async fn delete_issue_comment(
     auth: Authorization,
     State(st): State<St>,
