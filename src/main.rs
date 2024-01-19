@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bytes::Bytes;
+use clap::*;
 use http::header::{HeaderName, HeaderValue};
 use hyper::Server;
 use serde::Deserialize;
 use serde_json::Deserializer;
-use structopt::*;
 use tower::{make::Shared, ServiceBuilder};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::{
@@ -28,27 +28,28 @@ use tracing_subscriber::fmt::format::FmtSpan;
 mod github;
 mod model;
 
-#[derive(StructOpt)]
+#[derive(Parser)]
+#[command(author, version, about)]
 struct Opt {
     /// Users configuration, JSON data sent either through a file or
     /// through stdin (if `-`), should be a map of login to [`User`]
     users: PathBuf,
     /// Port on which to bind the server, if `0` ask the OS for an
     /// ephemeral port
-    #[structopt(short, long, default_value = "0")]
+    #[arg(short, long, default_value_t = 0)]
     port: u16,
     /// File in which to write the port listening on, mostly useful if
     /// using `0`
-    #[structopt(long)]
+    #[arg(long)]
     portfile: Option<PathBuf>,
     /// One of trace, debug, info, warn, or error
-    #[structopt(long, default_value = "warn")]
+    #[arg(long, default_value = "warn")]
     log: Level,
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
     // TODO:  should have a big dynamic fallback route for all the
     //        github stuff, and a bunch of static routes for its own
     //        internal stuff.  This is necessary in order for the

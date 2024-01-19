@@ -32,7 +32,10 @@ use github_types::webhooks::{self, Webhook};
 use github_types::RateLimit;
 
 use crate::model::repos::Repository;
-use crate::model::users::{find_current_user, list_user_emails, User};
+use crate::model::users::{
+    find_current_user, list_user_emails, Email as ModelEmail, Type, User,
+    Visibility,
+};
 use crate::model::{Source, Token};
 
 mod repos;
@@ -271,9 +274,9 @@ impl User<'_> {
     fn into_simple(self, root: &str) -> SimpleUser {
         SimpleUser {
             url: SimpleUser::url(root, &self.login),
-            email: self.email.clone().map(Into::into),
-            login: self.login.clone().into(),
-            name: self.name.clone().map(Into::into),
+            email: self.email.map(Into::into),
+            login: self.login.into(),
+            name: self.name.map(Into::into),
             r#type: self.r#type.into(),
         }
     }
@@ -289,11 +292,11 @@ impl From<User<'_>> for PublicUser {
         }
     }
 }
-impl From<crate::model::users::Type> for UserType {
-    fn from(t: crate::model::users::Type) -> Self {
+impl From<Type> for UserType {
+    fn from(t: Type) -> Self {
         match t {
-            crate::model::users::Type::User => UserType::User,
-            crate::model::users::Type::Organization => UserType::Organization,
+            Type::User => UserType::User,
+            Type::Organization => UserType::Organization,
         }
     }
 }
@@ -473,13 +476,11 @@ async fn get_user(
     let mut db = Source::get();
     let tok = &db.token();
     crate::model::users::get_user(tok, &username)
+        .map(PublicUser::from)
+        .map(Json)
         .ok_or_else(|| {
             Error::NOT_FOUND.into_response("users", "users", "get-a-user")
         })
-        .map(
-            // NOTE: works fine for API, but not web
-            |u| Json(PublicUser::from(u)),
-        )
 }
 
 #[instrument(skip(st))]
@@ -487,11 +488,10 @@ async fn get_org(
     State(st): State<St>,
     Path(orgname): Path<String>,
 ) -> Result<Json<OrganizationFull>, GHError<'static>> {
-    use crate::model::users::*;
     let _span = span!(Level::INFO, "get-org").entered();
     let mut db = Source::get();
     let tx = &db.token();
-    get_user(tx, &orgname)
+    crate::model::users::get_user(tx, &orgname)
         .filter(|u| matches!(u.r#type, Type::Organization))
         .ok_or_else(|| {
             info!("{orgname} not found");
@@ -642,7 +642,6 @@ async fn rate_limit() -> ([(&'static str, &'static str); 1], Json<RateLimit>) {
     )
 }
 
-use crate::model::users::Email as ModelEmail;
 impl From<ModelEmail<'_>> for Email {
     fn from(
         ModelEmail {
@@ -661,14 +660,12 @@ impl From<ModelEmail<'_>> for Email {
         }
     }
 }
-use crate::model::users::Visibility as ModelVisibility;
-use github_types::users::Visibility as APIVisibility;
 
-impl From<ModelVisibility> for APIVisibility {
-    fn from(vis: ModelVisibility) -> Self {
+impl From<Visibility> for github_types::users::Visibility {
+    fn from(vis: Visibility) -> Self {
         match vis {
-            ModelVisibility::Public => APIVisibility::Public,
-            ModelVisibility::Private => APIVisibility::Private,
+            Visibility::Public => Self::Public,
+            Visibility::Private => Self::Private,
         }
     }
 }
