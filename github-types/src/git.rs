@@ -1,7 +1,7 @@
 use std::borrow::Cow;
 
 use chrono::{DateTime, FixedOffset, NaiveDateTime, SecondsFormat};
-use git_object::Kind;
+use gix_object::Kind;
 use serde::{Deserialize, Serialize};
 
 // FIXME: decorrelate internal authorship model from over the wire, so date is not optional
@@ -21,13 +21,13 @@ pub struct Authorship {
 ///
 /// TODO: see what tz github uses in those cases (or if it's just an error but
 ///       it doesn't seem to be at least for out of range dates)
-impl From<Authorship> for git_actor::Signature {
+impl From<Authorship> for gix_actor::Signature {
     fn from(a: Authorship) -> Self {
         let time = a
             .date
             .and_then(|d| DateTime::parse_from_rfc3339(&d).ok())
-            .map_or_else(git_actor::Time::now_utc, |dt| {
-                git_actor::Time::new(
+            .map_or_else(gix_date::Time::now_utc, |dt| {
+                gix_date::Time::new(
                     // it's really weird but this is the actual github behaviour,
                     // not entirely clear what the git date-parsing code does
                     dt.timestamp() as _,
@@ -35,22 +35,18 @@ impl From<Authorship> for git_actor::Signature {
                 )
             });
 
-        git_actor::Signature {
+        gix_actor::Signature {
             name: a.name.into(),
             email: a.email.into(),
             time,
         }
     }
 }
-impl From<git_actor::SignatureRef<'_>> for Authorship {
-    fn from(s: git_actor::SignatureRef<'_>) -> Self {
+impl From<gix_actor::SignatureRef<'_>> for Authorship {
+    fn from(s: gix_actor::SignatureRef<'_>) -> Self {
         let dt = DateTime::<FixedOffset>::from_naive_utc_and_offset(
-            NaiveDateTime::from_timestamp_opt(
-                s.time.seconds_since_unix_epoch as _,
-                0,
-            )
-            .unwrap(),
-            FixedOffset::east_opt(s.time.offset_in_seconds).unwrap(),
+            NaiveDateTime::from_timestamp_opt(s.time.seconds, 0).unwrap(),
+            FixedOffset::east_opt(s.time.offset).unwrap(),
         );
 
         Self {
@@ -165,7 +161,7 @@ pub struct Entry {
     /// TODO: check if that's a filename or a path
     pub path: String,
     /// TODO: should be an EntryMode parsed from a string, but
-    ///       git_object parses from an integer
+    ///       gix_object parses from an integer
     pub mode: String,
     #[serde(flatten)]
     pub item: Item,
@@ -230,14 +226,14 @@ pub struct ShortObject {
     pub sha: String,
     pub url: String,
 }
-impl From<(&str, &str, &str, Kind, &git_hash::oid)> for ShortObject {
+impl From<(&str, &str, &str, Kind, &gix_hash::oid)> for ShortObject {
     fn from(
         (root, owner, name, kind, oid): (
             &str,
             &str,
             &str,
             Kind,
-            &git_hash::oid,
+            &gix_hash::oid,
         ),
     ) -> Self {
         let kind = match kind {
@@ -254,7 +250,7 @@ impl From<(&str, &str, &str, Kind, &git_hash::oid)> for ShortObject {
     }
 }
 
-impl From<(&String, &String, &String, Kind, git_hash::ObjectId)>
+impl From<(&String, &String, &String, Kind, gix_hash::ObjectId)>
     for ShortObject
 {
     fn from(
@@ -263,7 +259,7 @@ impl From<(&String, &String, &String, Kind, git_hash::ObjectId)>
             &String,
             &String,
             Kind,
-            git_hash::ObjectId,
+            gix_hash::ObjectId,
         ),
     ) -> Self {
         Self::from((

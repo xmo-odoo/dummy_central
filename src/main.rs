@@ -12,8 +12,8 @@ use bytes::Bytes;
 use clap::*;
 use serde::Deserialize;
 use serde_json::Deserializer;
-use tower::{make::Shared, ServiceBuilder};
 use tokio::net::TcpListener;
+use tower::{make::Shared, ServiceBuilder};
 use tower_http::timeout::TimeoutLayer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
@@ -107,6 +107,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         write!(f, "{}", addr.port())?;
         f.flush()?;
     }
+
     let _ = tokio::join![
         axum::serve(listener, Shared::new(handler)).into_future(),
         webhooks

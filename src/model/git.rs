@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 
-use git_actor::Signature;
-use git_diff::tree::{recorder::Change, Changes, Recorder, State};
-use git_hash::{oid, ObjectId};
-use git_object::{
+use gix_actor::Signature;
+use gix_diff::tree::{recorder::Change, Changes, Recorder, State};
+use gix_hash::{oid, ObjectId};
+use gix_object::{
     bstr::BStr, tree::Entry, Commit, CommitRef, Kind, Object, ObjectRef,
     TagRef, Tree, TreeRefIter,
 };
@@ -12,11 +12,25 @@ use sha1::{Digest, Sha1};
 
 use super::{repos::Network, Token};
 
-/// git_object's `loose_header` const size, not sure why 28 (I count about 12)
+/// gix_object's `loose_header` const size, not sure why 28 (I count about 12)
 const HEADER_SIZE: usize = 28;
 
+/// Extacts the "sha" column from a [rusqlite::Row] and converts it to an
+/// [ObjectId]
+fn sha_to_oid(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectId> {
+    <[u8; 20]>::try_from(row.get_ref("sha")?.as_blob()?)
+        .map(ObjectId::from)
+        .map_err(|e| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Blob,
+                e.into(),
+            )
+        })
+}
+
 pub mod refs {
-    use git_hash::{oid, ObjectId};
+    use gix_hash::{oid, ObjectId};
     use rusqlite::OptionalExtension;
 
     use crate::model::{repos::RepositoryId, Token};
@@ -33,7 +47,7 @@ pub mod refs {
             WHERE repository = ? AND name = ?
         ",
             (*repo, name),
-            |row| Ok(ObjectId::from(row.get_ref("sha")?.as_blob()?)),
+            super::sha_to_oid,
         )
         .optional()
         .unwrap()
@@ -148,9 +162,7 @@ pub mod refs {
 pub fn get_objects(tx: &Token, network: Network) -> Vec<ObjectId> {
     tx.prepare("SELECT sha FROM objects WHERE network = ?")
         .unwrap()
-        .query_map([*network], |row| {
-            Ok(ObjectId::from(row.get_ref("sha")?.as_bytes()?))
-        })
+        .query_map([*network], sha_to_oid)
         .unwrap()
         .map(Result::unwrap)
         .collect()
@@ -176,17 +188,15 @@ pub fn get(tx: &Token, network: Network, oid: &oid) -> Option<ObjectDbId> {
 }
 
 pub fn deref(tx: &Token, id: ObjectDbId) -> ObjectId {
-    tx.query_row("SELECT sha FROM objects WHERE id = ?", [*id], |row| {
-        Ok(ObjectId::from(row.get_ref("sha")?.as_blob()?))
-    })
-    .unwrap()
+    tx.query_row("SELECT sha FROM objects WHERE id = ?", [*id], sha_to_oid)
+        .unwrap()
 }
 
 pub fn load(
     tx: &Token,
     network: Network,
     oid: &oid,
-) -> Option<git_object::Object> {
+) -> Option<gix_object::Object> {
     tx.query_row(
         "SELECT data FROM objects WHERE network = ? AND sha = ?",
         (*network, oid.as_bytes()),
@@ -204,7 +214,7 @@ pub fn get_in<'buf>(
     network: Network,
     oid: &oid,
     buf: &'buf mut Vec<u8>,
-) -> Option<(git_object::Kind, &'buf [u8])> {
+) -> Option<(gix_object::Kind, &'buf [u8])> {
     tx.query_row(
         "SELECT data FROM objects WHERE network = ? AND sha = ?",
         (*network, oid.as_bytes()),
@@ -216,14 +226,14 @@ pub fn get_in<'buf>(
     .optional()
     .unwrap()?;
 
-    let (kind, _, consumed) = git_object::decode::loose_header(buf).ok()?;
+    let (kind, _, consumed) = gix_object::decode::loose_header(buf).ok()?;
     Some((kind, &buf[consumed..]))
 }
 
 pub fn store(
     tx: &Token,
     network: Network,
-    object: impl git_object::WriteTo,
+    object: impl gix_object::WriteTo,
 ) -> ObjectId {
     let mut obj = Vec::new();
     object
@@ -275,7 +285,7 @@ pub fn find_blob(
     network: Network,
     path: &str,
     mut entries: Vec<Entry>,
-) -> Option<(ObjectId, git_object::Blob)> {
+) -> Option<(ObjectId, gix_object::Blob)> {
     for p in path.split('/') {
         let entry = std::mem::take(&mut entries)
             .into_iter()
@@ -347,6 +357,19 @@ impl Iterator for Log<'_, '_> {
     }
 }
 
+struct Finder<'a, 'b: 'a>(&'b Token<'a>, Network);
+
+impl gix_object::Find for Finder<'_, '_> {
+    fn try_find<'a>(
+        &self,
+        id: &gix_hash::oid,
+        buffer: &'a mut Vec<u8>,
+    ) -> Result<Option<gix_object::Data<'a>>, gix_object::find::Error> {
+        Ok(get_in(self.0, self.1, id, buffer)
+            .map(|(kind, data)| gix_object::Data { kind, data }))
+    }
+}
+
 pub fn merge(
     tx: &Token,
     network: Network,
@@ -375,7 +398,7 @@ pub fn merge(
             .needed_to_obtain(
                 left_tree,
                 State::default(),
-                |oid, buf| get_tree_in(tx, network, oid, buf),
+                Finder(tx, network),
                 &mut changes1,
             )
             .map_err(|_| MergeError::NotFound)?;
@@ -389,7 +412,7 @@ pub fn merge(
             .needed_to_obtain(
                 right_tree,
                 State::default(),
-                |oid, buf| get_tree_in(tx, network, oid, buf),
+                Finder(tx, network),
                 &mut changes2,
             )
             .map_err(|_| MergeError::NotFound)?;
@@ -578,7 +601,7 @@ impl std::fmt::Display for MergeError {
 }
 impl std::error::Error for MergeError {}
 
-fn path(c: &Change) -> &git_object::bstr::BStr {
+fn path(c: &Change) -> &gix_object::bstr::BStr {
     match c {
         Change::Addition { path, .. }
         | Change::Deletion { path, .. }

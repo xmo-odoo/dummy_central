@@ -10,13 +10,13 @@ use bytes::Buf;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;
 use flate2::{Compression, FlushDecompress};
-use git_features::decode::leb64_from_read;
-use git_hash::ObjectId;
-use git_object::{Data, Kind, ObjectRef, WriteTo};
-use git_pack::data::input::{BytesToEntriesIter, EntryDataMode, Mode};
-use git_pack::data::output::bytes::FromEntriesIter;
-use git_pack::data::output::{Count, Entry as PackEntry};
-use git_pack::data::Version;
+use gix_features::decode::leb64_from_read;
+use gix_hash::ObjectId;
+use gix_object::{Data, Kind, ObjectRef, WriteTo};
+use gix_pack::data::input::{BytesToEntriesIter, EntryDataMode, Mode};
+use gix_pack::data::output::bytes::FromEntriesIter;
+use gix_pack::data::output::{Count, Entry as PackEntry};
+use gix_pack::data::Version;
 use headers::HeaderMap;
 use tracing::instrument;
 
@@ -29,9 +29,9 @@ pub fn routes() -> Router<St> {
     // https://docs.rs/axum/latest/axum/middleware/index.html#passing-state-from-middleware-to-handlers
     // TODO: add extractor for the Protocol instead of doing it by hand
     Router::new()
-        .route("/info/refs", get(git_refs))
-        .route("/git-upload-pack", post(git_upload_pack))
-        .route("/git-receive-pack", post(git_receive_pack))
+        .route("/info/refs", get(gix_refs))
+        .route("/git-upload-pack", post(gix_upload_pack))
+        .route("/git-receive-pack", post(gix_receive_pack))
         .route("/HEAD", get(get_head))
         .route("/objects/:s/:ha", get(get_object))
 }
@@ -62,7 +62,7 @@ async fn get_object(
     let repo = crate::model::repos::by_name(tx, &owner, name)
         .ok_or(http::StatusCode::NOT_FOUND)?;
 
-    let mut oid = ObjectId::null(git_hash::Kind::Sha1);
+    let mut oid = ObjectId::null(gix_hash::Kind::Sha1);
     // FIXME: tracing
     hex::decode_to_slice(s, &mut oid.as_mut_slice()[..1])
         .and_then(|_| hex::decode_to_slice(ha, &mut oid.as_mut_slice()[1..]))
@@ -88,7 +88,7 @@ struct Service {
 fn write_ref<W: std::io::Write>(
     mut buf: W,
     refname: &str,
-    oid: &git_hash::oid,
+    oid: &gix_hash::oid,
     capabilities: Option<&str>,
 ) -> std::io::Result<()> {
     let (caplen, capsep, caps) =
@@ -107,7 +107,7 @@ fn write_ref<W: std::io::Write>(
 }
 
 #[instrument(err(Debug))]
-async fn git_refs(
+async fn gix_refs(
     auth: Option<Authorization>,
     State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -187,7 +187,7 @@ enum Sideband {
 }
 
 #[instrument]
-async fn git_upload_pack(
+async fn gix_upload_pack(
     State(_): State<St>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Response {
@@ -209,7 +209,7 @@ async fn git_upload_pack(
         objects.into_iter().map(
             |oid| -> Result<
                 Vec<PackEntry>,
-                git_pack::data::output::entry::Error,
+                gix_pack::data::output::entry::Error,
             > {
                 buf.clear();
                 let (kind, data) =
@@ -225,7 +225,7 @@ async fn git_upload_pack(
         &mut pack,
         count.try_into().unwrap(),
         Version::V2,
-        git_hash::Kind::Sha1,
+        gix_hash::Kind::Sha1,
     );
 
     for e in entries_writer.by_ref() {
@@ -255,7 +255,7 @@ async fn git_upload_pack(
 }
 
 #[instrument(skip(st))]
-async fn git_receive_pack(
+async fn gix_receive_pack(
     auth: Authorization,
     State(st): State<St>,
     Path((owner, name)): Path<(String, String)>,
@@ -270,7 +270,10 @@ async fn git_receive_pack(
     let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return (
             http::StatusCode::UNAUTHORIZED,
-            [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
+            [(
+                http::header::WWW_AUTHENTICATE,
+                "Basic realm=\"GitHub\"",
+            )],
             b"No anonymous write access.".as_slice(),
         )
             .into_response();
@@ -415,7 +418,7 @@ fn load_pack_data(
         r,
         Mode::Verify,
         EntryDataMode::Keep,
-        git_hash::Kind::Sha1,
+        gix_hash::Kind::Sha1,
     )
     .unwrap();
     let mut entries_offset_cache = HashMap::<_, ObjectId>::new();
@@ -427,14 +430,14 @@ fn load_pack_data(
         let compressed = entry.compressed.unwrap();
 
         let (kind, filled) = match entry.header {
-            git_pack::data::entry::Header::Commit => (Kind::Commit, false),
-            git_pack::data::entry::Header::Tree => (Kind::Tree, false),
-            git_pack::data::entry::Header::Blob => (Kind::Blob, false),
-            git_pack::data::entry::Header::Tag => (Kind::Tag, false),
-            git_pack::data::entry::Header::RefDelta { base_id: _ } => {
+            gix_pack::data::entry::Header::Commit => (Kind::Commit, false),
+            gix_pack::data::entry::Header::Tree => (Kind::Tree, false),
+            gix_pack::data::entry::Header::Blob => (Kind::Blob, false),
+            gix_pack::data::entry::Header::Tag => (Kind::Tag, false),
+            gix_pack::data::entry::Header::RefDelta { base_id: _ } => {
                 todo!("Implement unpacking of ref-delta entries");
             }
-            git_pack::data::entry::Header::OfsDelta { base_distance } => {
+            gix_pack::data::entry::Header::OfsDelta { base_distance } => {
                 let oid =
                     entries_offset_cache[&(entry.pack_offset - base_distance)];
                 parent_buf.clear();

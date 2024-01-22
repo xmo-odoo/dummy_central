@@ -351,8 +351,8 @@ async fn get_pull_request_commits(
                 &mut commit_buf,
             )
             .unwrap();
-            assert_eq!(kind, git_object::Kind::Commit);
-            let commit = git_object::CommitRef::from_bytes(data).unwrap();
+            assert_eq!(kind, gix_object::Kind::Commit);
+            let commit = gix_object::CommitRef::from_bytes(data).unwrap();
             // we're doing breadth-first, bois
             for p in commit.parents() {
                 if !base_commits.contains(&p) && !oids.contains(&p) {
@@ -754,7 +754,7 @@ async fn create_review(
 
     let commit_id = if let Some(cid) = req.commit_id {
         // TODO: what response for invalid id?
-        let oid = git_hash::ObjectId::from_hex(cid.as_bytes())
+        let oid = gix_hash::ObjectId::from_hex(cid.as_bytes())
             .expect("invalid oid format");
         // TODO: what if commit_id is a well-formed hash but not valid for the repo?
         crate::model::git::get(&tx, repo.network, &oid)

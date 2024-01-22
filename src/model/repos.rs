@@ -373,7 +373,7 @@ pub fn delete_hook(tx: &Token, hook: i64) -> bool {
 pub fn get_statuses(
     tx: &Token,
     network: Network,
-    oid: &git_hash::oid,
+    oid: &gix_hash::oid,
 ) -> Vec<CreateStatusResponse> {
     tx.prepare(
         "

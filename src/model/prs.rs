@@ -1,4 +1,4 @@
-use git_hash::{oid, ObjectId};
+use gix_hash::{oid, ObjectId};
 use rusqlite::{types::FromSqlError, OptionalExtension as _};
 
 use super::{
@@ -27,7 +27,7 @@ impl std::ops::Deref for PullRequestId {
 pub struct PullRequest {
     pub id: PullRequestId,
     pub issue: Issue,
-    pub head: git_hash::ObjectId,
+    pub head: gix_hash::ObjectId,
     pub draft: bool,
 
     /// target branch

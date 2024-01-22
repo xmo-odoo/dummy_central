@@ -7,9 +7,10 @@ edition = "2021"
 
 [dependencies]
 base64 = "*"
-git-actor = "*"
-git-hash = "*"
-git-object = "*"
+gix-actor = "*"
+gix-date = "*"
+gix-hash = "*"
+gix-object = "*"
 hex = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"

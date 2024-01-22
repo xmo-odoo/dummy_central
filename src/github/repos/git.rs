@@ -5,9 +5,9 @@ use axum::extract::{Path, Query, State};
 use axum::routing::{get, post};
 use axum::{Json, Router, http};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use git_object::bstr::ByteSlice;
-use git_object::tree::{Entry as TreeEntry, EntryMode};
-use git_object::{Kind, WriteTo as _};
+use gix_object::bstr::ByteSlice;
+use gix_object::tree::{Entry as TreeEntry, EntryKind};
+use gix_object::{Kind, WriteTo as _};
 use tracing::instrument;
 
 pub use github_types::git::*;
@@ -52,7 +52,7 @@ async fn create_blob(
     let oid = crate::model::git::store(
         &tx,
         repo.network,
-        git_object::BlobRef::from_bytes(&req.as_bytes()).unwrap(),
+        gix_object::BlobRef::from_bytes(&req.as_bytes()).unwrap(),
     );
 
     tx.commit().unwrap();
@@ -97,7 +97,7 @@ async fn get_blob(
         ));
     };
 
-    let Some(object) = git_hash::ObjectId::from_hex(blob_id.as_bytes())
+    let Some(object) = gix_hash::ObjectId::from_hex(blob_id.as_bytes())
         .ok()
         .and_then(|oid| crate::model::git::load(tx, repo.network, &oid))
     else {
@@ -135,7 +135,7 @@ async fn get_tree(
     };
 
     // todo: invalid oid? missing tree?
-    let t = git_hash::ObjectId::from_hex(tree_id.as_bytes())
+    let t = gix_hash::ObjectId::from_hex(tree_id.as_bytes())
         .ok()
         .and_then(|oid| crate::model::git::load(tx, repo.network, &oid));
     let tree = if let Some(t) = t {
@@ -166,13 +166,13 @@ async fn get_tree(
                     crate::model::git::load(tx, repo.network, &e.oid).unwrap();
                 TreeResponseEntry {
                     path: e.filename.to_string(),
-                    size: obj.size(),
-                    mode: match e.mode {
-                        EntryMode::Blob => "100644",
-                        EntryMode::BlobExecutable => "100755",
-                        EntryMode::Link => "120000",
-                        EntryMode::Tree => "040000",
-                        EntryMode::Commit => "160000",
+                    size: obj.size() as _,
+                    mode: match e.mode.kind() {
+                        EntryKind::Blob => "100644",
+                        EntryKind::BlobExecutable => "100755",
+                        EntryKind::Link => "120000",
+                        EntryKind::Tree => "040000",
+                        EntryKind::Commit => "160000",
                     }
                     .to_string(),
                     obj: ShortObject::from((
@@ -205,10 +205,10 @@ async fn create_tree(
     };
 
     // TODO: what if oid is not valid, or not in repo, or not a tree?
-    let empty_tree = git_object::Tree::empty();
-    let mut tree: git_object::Tree = req
+    let empty_tree = gix_object::Tree::empty();
+    let mut tree: gix_object::Tree = req
         .base_tree
-        .and_then(|h| git_hash::ObjectId::from_hex(h.as_bytes()).ok())
+        .and_then(|h| gix_hash::ObjectId::from_hex(h.as_bytes()).ok())
         .and_then(|oid| crate::model::git::load(&tx, repo.network, &oid))
         .map(|o| o.into_tree())
         .unwrap_or(empty_tree);
@@ -218,20 +218,21 @@ async fn create_tree(
     // TODO: does each entry need to be validated?
     for Entry { path, mode, item } in req.tree {
         let mode = match mode.as_str() {
-            "100644" => EntryMode::Blob,
-            "100755" => EntryMode::BlobExecutable,
-            "120000" => EntryMode::Link,
-            "040000" => EntryMode::Tree,
-            "160000" => EntryMode::Commit,
+            "100644" => EntryKind::Blob,
+            "100755" => EntryKind::BlobExecutable,
+            "120000" => EntryKind::Link,
+            "040000" => EntryKind::Tree,
+            "160000" => EntryKind::Commit,
             _ => unreachable!("check what happens on invalid mode"),
-        };
+        }
+        .into();
         // TODO: do these need to be validated against the mode?
         let oid = match item {
             Item::Blob(BlobItem::Content { content }) => {
                 crate::model::git::store(
                     &tx,
                     repo.network,
-                    git_object::Blob {
+                    gix_object::Blob {
                         data: content.into_bytes(),
                     },
                 )
@@ -239,7 +240,7 @@ async fn create_tree(
             Item::Blob(BlobItem::Sha { sha })
             | Item::Commit { sha }
             | Item::Tree { sha } => {
-                git_hash::ObjectId::from_hex(sha.as_bytes()).unwrap()
+                gix_hash::ObjectId::from_hex(sha.as_bytes()).unwrap()
             }
         };
         // TODO: does the oid need to be checked against the repo? (probably duh)
@@ -296,7 +297,7 @@ async fn get_commit(
             "get-a-commit",
         );
     };
-    let oid = git_hash::ObjectId::from_hex(cid.as_bytes())
+    let oid = gix_hash::ObjectId::from_hex(cid.as_bytes())
         .map_err(|_| not_found())?;
     let commit = crate::model::git::load(tx, repo.network, &oid)
         .and_then(|obj| obj.try_into_commit().ok())
@@ -357,7 +358,7 @@ async fn create_commit(
         ));
     };
 
-    let default_signature = git_actor::Signature {
+    let default_signature = gix_actor::Signature {
         name: user.login.as_ref().into(),
         email: user
             .email
@@ -365,19 +366,19 @@ async fn create_commit(
             .map(Cow::as_ref)
             .unwrap_or("user@example.org")
             .into(),
-        time: git_actor::Time::now_utc(),
+        time: gix_date::Time::now_utc(),
     };
     // FIXME: {author: null} should be an error, but missing should fallback
     //        github is stupid
     // FIXME: mostly duplicate of the one in contents
-    let commit = git_object::Commit {
+    let commit = gix_object::Commit {
         message: req.message.trim().into(),
         // FIXME: validate tree, and parents
-        tree: git_hash::ObjectId::from_hex(req.tree.as_bytes()).unwrap(),
+        tree: gix_hash::ObjectId::from_hex(req.tree.as_bytes()).unwrap(),
         parents: req
             .parents
             .iter()
-            .map(|h| git_hash::ObjectId::from_hex(h.as_bytes()).unwrap())
+            .map(|h| gix_hash::ObjectId::from_hex(h.as_bytes()).unwrap())
             .collect(),
         author: req
             .author
@@ -455,7 +456,7 @@ async fn create_ref(
     };
 
     // FIXME: should fail for "empty repository" aka repo with no branches
-    let oid = git_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
+    let oid = gix_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
     let Some(obj) = crate::model::git::load(&tx, repo.network, &oid) else {
         return Err(Error::unprocessable("Object does not exist", &[])
             .into_response("git", "refs", "create-a-reference"));
@@ -615,7 +616,7 @@ async fn update_ref(
         return Err(Error::unprocessable("Reference does not exist", &[])
             .into_response("git", "refs", "update-a-reference"));
     };
-    let new_oid = git_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
+    let new_oid = gix_hash::ObjectId::from_hex(req.sha.as_bytes()).unwrap();
     let Some(new) = crate::model::git::load(&tx, repo.network, &new_oid) else {
         return Err(Error::unprocessable("Object does not exist", &[])
             .into_response("git", "refs", "update-a-reference"));
@@ -697,7 +698,7 @@ pub fn find_and_update_pr(
     tx: &crate::model::Token,
     st: &super::Config,
     writer: &crate::github::User,
-    new_oid: git_hash::ObjectId,
+    new_oid: gix_hash::ObjectId,
     (source_id, branchname): BranchRef,
     forced: bool,
 ) {

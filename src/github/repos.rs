@@ -9,8 +9,9 @@ use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use bytes::Bytes;
-use git_actor::{Signature, Time};
-use git_object::bstr::ByteSlice;
+use gix_actor::Signature;
+use gix_date::Time;
+use gix_object::bstr::ByteSlice;
 use serde::Deserialize;
 use smallvec::SmallVec;
 use tracing::instrument;
@@ -67,8 +68,8 @@ struct Bundle<'r, 's: 'r>(
     &'r crate::github::Config,
     &'r str,
     &'r str,
-    &'r git_hash::oid,
-    &'r git_object::CommitRef<'s>,
+    &'r gix_hash::oid,
+    &'r gix_object::CommitRef<'s>,
 );
 impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
     fn from(
@@ -603,7 +604,7 @@ async fn list_commits(
     // TODO: what happens if the requested ref does not exist?
     // FIXME: (IIRC) github sorts commits by date because it's a dummy
     let sha_or_branch = q.sha.as_ref().unwrap_or(&repo.default_branch);
-    let sha_or_branch = git_hash::ObjectId::from_hex(sha_or_branch.as_bytes())
+    let sha_or_branch = gix_hash::ObjectId::from_hex(sha_or_branch.as_bytes())
         .ok()
         .or_else(|| {
             crate::model::git::refs::resolve(
@@ -637,8 +638,8 @@ async fn list_commits(
         let (kind, data) =
             crate::model::git::get_in(tx, repo.network, &oid, &mut commit_buf)
                 .unwrap();
-        assert_eq!(kind, git_object::Kind::Commit);
-        let commit = git_object::CommitRef::from_bytes(data).unwrap();
+        assert_eq!(kind, gix_object::Kind::Commit);
+        let commit = gix_object::CommitRef::from_bytes(data).unwrap();
         output.push(CommitsResponse::from(Bundle(
             &st, &owner, &name, &oid, &commit,
         )));
@@ -694,7 +695,7 @@ async fn get_commit(
 
     let commit_ref = commit_ref.as_str();
     let oid =
-        if let Ok(oid) = git_hash::ObjectId::from_hex(commit_ref.as_bytes()) {
+        if let Ok(oid) = gix_hash::ObjectId::from_hex(commit_ref.as_bytes()) {
             oid
         } else {
             let commit_ref: Cow<'_, _> = if !commit_ref.starts_with("refs/") {
@@ -729,7 +730,7 @@ async fn get_commit(
         ));
     };
 
-    if kind != git_object::Kind::Commit {
+    if kind != gix_object::Kind::Commit {
         let msg = format!("No commit found for SHA: {commit_ref}");
         return Err(Error::Unprocessable(msg.into(), &[]).into_response(
             "commits",
@@ -737,7 +738,7 @@ async fn get_commit(
             "get-a-commit",
         ));
     }
-    let commit = git_object::CommitRef::from_bytes(data).unwrap();
+    let commit = gix_object::CommitRef::from_bytes(data).unwrap();
 
     Ok(Json(CommitsResponse::from(Bundle(
         &st, &owner, &name, &oid, &commit,
@@ -762,7 +763,7 @@ async fn get_status(
 
     // FIXME: commit_ref can be a branch name (an actual ref)
     // TODO: is that what should happen for an invalid ref? Or am unknown commit?
-    let Some(oid) = git_hash::ObjectId::from_hex(commit_ref.as_bytes())
+    let Some(oid) = gix_hash::ObjectId::from_hex(commit_ref.as_bytes())
         .ok()
         .and_then(|oid| {
             crate::model::git::load(tx, repo.network, &oid).map(|_| oid)
@@ -856,9 +857,9 @@ async fn create_or_update_contents(
         .expect("FIXME: what happens on invalid base64?");
     let data_size = data.len();
     let mut oid =
-        crate::model::git::store(&tx, repo.network, git_object::Blob { data });
+        crate::model::git::store(&tx, repo.network, gix_object::Blob { data });
     let file_oid = oid;
-    let mut mode = git_object::tree::EntryMode::Blob;
+    let mut mode = gix_object::tree::EntryKind::Blob.into();
     // if we had a branch, we'd have to check if there was already a file at
     // the given path, and if so check what happens if the sha is missing or
     // incorrect
@@ -885,15 +886,15 @@ async fn create_or_update_contents(
         oid = crate::model::git::store(
             &tx,
             repo.network,
-            git_object::Tree {
-                entries: vec![git_object::tree::Entry {
+            gix_object::Tree {
+                entries: vec![gix_object::tree::Entry {
                     mode,
                     filename: segment.into(),
                     oid,
                 }],
             },
         );
-        mode = git_object::tree::EntryMode::Tree;
+        mode = gix_object::tree::EntryKind::Tree.into();
     }
 
     let default_signature = Signature {
@@ -911,7 +912,7 @@ async fn create_or_update_contents(
     if let Some(h) = branch_head {
         parents.push(h);
     }
-    let commit = git_object::Commit {
+    let commit = gix_object::Commit {
         tree: oid,
         parents,
         author: request
@@ -1024,11 +1025,11 @@ async fn create_status(
     let commit =
         percent_encoding::percent_decode_str(&commit).decode_utf8_lossy();
 
-    let Some(c) = git_hash::ObjectId::from_hex(commit.as_bytes())
+    let Some(c) = gix_hash::ObjectId::from_hex(commit.as_bytes())
         .ok()
         .filter(|c| {
             crate::model::git::load(&tx, repo.network, c).map(|o| o.kind())
-                == Some(git_object::Kind::Commit)
+                == Some(gix_object::Kind::Commit)
         })
         .and_then(|c| crate::model::git::get(&tx, repo.network, &c))
     else {
@@ -1118,7 +1119,7 @@ async fn create_branch_merge(
     };
 
     // `head` can be either a sha1 or a branchname
-    let head = if let Ok(h) = git_hash::ObjectId::from_hex(req.head.as_bytes())
+    let head = if let Ok(h) = gix_hash::ObjectId::from_hex(req.head.as_bytes())
     {
         let Some(object) = crate::model::git::load(&tx, repo.network, &h)
         else {
@@ -1126,7 +1127,7 @@ async fn create_branch_merge(
                 .into_response("branches", "branches", "merge-a-branch")
                 .into_response());
         };
-        if object.kind() != git_object::Kind::Commit {
+        if object.kind() != gix_object::Kind::Commit {
             return Err(Error::unprocessable("", &[])
                 .into_response("branches", "branches", "merge-a-branch")
                 .into_response());
@@ -1181,8 +1182,8 @@ async fn create_branch_merge(
         let (kind, data) =
             crate::model::git::get_in(&tx, repo.network, &oid, &mut buf)
                 .unwrap();
-        assert_eq!(kind, git_object::Kind::Commit);
-        let commit = git_object::CommitRef::from_bytes(data).unwrap();
+        assert_eq!(kind, gix_object::Kind::Commit);
+        let commit = gix_object::CommitRef::from_bytes(data).unwrap();
         tx.commit().unwrap();
 
         Ok((
@@ -1352,7 +1353,7 @@ async fn get_branch(
     };
 
     // FIXME: is this the right error?
-    if kind != git_object::Kind::Commit {
+    if kind != gix_object::Kind::Commit {
         let msg = format!("No commit found for SHA: {branch_ref}");
         return Err(Error::Unprocessable(msg.into(), &[]).into_response(
             "branches",
@@ -1360,7 +1361,7 @@ async fn get_branch(
             "get-a-branch",
         ));
     }
-    let commit = git_object::CommitRef::from_bytes(data).unwrap();
+    let commit = gix_object::CommitRef::from_bytes(data).unwrap();
 
     Ok(Json(github_types::branches::BranchWithProtection {
         name: branch_name,

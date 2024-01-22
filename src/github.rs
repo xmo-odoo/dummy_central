@@ -13,7 +13,7 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{async_trait, Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
-use git_object::bstr::{BStr, BString};
+use gix_object::bstr::{BStr, BString};
 use hmac::{Hmac, Mac};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
@@ -586,16 +586,16 @@ async fn create_repository(
         let readme = crate::model::git::store(
             &tx,
             repo.network,
-            git_object::BlobRef::from_bytes(b"").unwrap(),
+            gix_object::BlobRef::from_bytes(b"").unwrap(),
         );
-        let mut t = git_object::TreeRef::empty();
-        t.entries.push(git_object::tree::EntryRef {
-            mode: git_object::tree::EntryMode::Blob,
+        let mut t = gix_object::TreeRef::empty();
+        t.entries.push(gix_object::tree::EntryRef {
+            mode: gix_object::tree::EntryKind::Blob.into(),
             filename: "README".into(),
             oid: &readme,
         });
         let tree = crate::model::git::store(&tx, repo.network, t);
-        let sig = git_actor::SignatureRef {
+        let sig = gix_actor::SignatureRef {
             name: u.login.as_ref().into(),
             // FIXME: email for default signature?
             email: u
@@ -604,12 +604,12 @@ async fn create_repository(
                 .map(Cow::as_ref)
                 .unwrap_or("user@example.org")
                 .into(),
-            time: git_actor::Time::now_utc(),
+            time: gix_date::Time::now_utc(),
         };
         let c = crate::model::git::store(
             &tx,
             repo.network,
-            git_object::CommitRef {
+            gix_object::CommitRef {
                 tree: BString::from(tree.to_hex().to_string()).as_ref(),
                 parents: Default::default(),
                 author: sig,
