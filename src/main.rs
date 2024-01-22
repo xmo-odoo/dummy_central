@@ -2,19 +2,18 @@
 
 use std::collections::HashMap;
 use std::fs;
+use std::future::IntoFuture;
 use std::io::{self, Write};
 use std::net::SocketAddr;
-use std::net::TcpListener;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use bytes::Bytes;
 use clap::*;
-use http::header::{HeaderName, HeaderValue};
-use hyper::Server;
 use serde::Deserialize;
 use serde_json::Deserializer;
 use tower::{make::Shared, ServiceBuilder};
+use tokio::net::TcpListener;
 use tower_http::timeout::TimeoutLayer;
 use tower_http::{
     catch_panic::CatchPanicLayer,
@@ -76,7 +75,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // TODO: support for domains (e.g. so we can generate URLs for
     //       locahost)
     let listener =
-        TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], opt.port)))?;
+        TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], opt.port))).await?;
     let addr = listener.local_addr()?;
 
     let url = format!("http://{addr}");
@@ -94,8 +93,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .on_response(DefaultOnResponse::new().include_headers(true).latency_unit(LatencyUnit::Micros)),
             )
             .layer(SetResponseHeaderLayer::if_not_present(
-                HeaderName::from_static("x_oauth_scopes"),
-                HeaderValue::from_static("admin:repo_hook, delete_repo, public_repo, user:email")
+                axum::http::HeaderName::from_static("x_oauth_scopes"),
+                axum::http::HeaderValue::from_static("admin:repo_hook, delete_repo, public_repo, user:email")
             ))
             .layer(CatchPanicLayer::new())
             // Set a timeout
@@ -109,7 +108,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         f.flush()?;
     }
     let _ = tokio::join![
-        Server::from_tcp(listener)?.serve(Shared::new(handler)),
+        axum::serve(listener, Shared::new(handler)).into_future(),
         webhooks
     ];
 

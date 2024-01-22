@@ -5,7 +5,7 @@ use std::ops::BitOr;
 use axum::extract::{Path, Query, State};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
-use axum::Router;
+use axum::{Router, http};
 use bytes::Buf;
 use flate2::read::ZlibDecoder;
 use flate2::write::ZlibEncoder;

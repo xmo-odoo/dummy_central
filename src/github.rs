@@ -6,15 +6,15 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use axum::extract::{FromRequestParts, Path, State};
+use axum::http::header::AUTHORIZATION;
 use axum::http::request::Parts;
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{async_trait, Json, Router};
 use base64::prelude::{Engine as _, BASE64_STANDARD};
 use git_object::bstr::{BStr, BString};
 use hmac::{Hmac, Mac};
-use hyper::header::AUTHORIZATION;
-use hyper::StatusCode;
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::Sha256;

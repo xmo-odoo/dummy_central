@@ -3,6 +3,7 @@ use std::collections::{HashSet, VecDeque};
 use std::convert::TryInto;
 
 use axum::extract::{Path, Query, State};
+use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
@@ -10,7 +11,6 @@ use base64::prelude::{Engine as _, BASE64_STANDARD};
 use bytes::Bytes;
 use git_actor::{Signature, Time};
 use git_object::bstr::ByteSlice;
-use http::StatusCode;
 use serde::Deserialize;
 use smallvec::SmallVec;
 use tracing::instrument;
