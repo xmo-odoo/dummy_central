@@ -138,9 +138,7 @@ async fn get_tree(
     let t = gix_hash::ObjectId::from_hex(tree_id.as_bytes())
         .ok()
         .and_then(|oid| crate::model::git::load(tx, repo.network, &oid));
-    let tree = if let Some(t) = t {
-        t
-    } else {
+    let Some(tree) = t else {
         return Err(Error::NOT_FOUND.into_response(
             "git",
             "tree",
@@ -151,7 +149,7 @@ async fn get_tree(
 
     // TODO: check if the trigger is having the query
     //       parameter at all or having a non-empty value
-    if query.get("recursive").map(|s| &**s).unwrap_or("") != "" {
+    if query.get("recursive").map_or("", |s| &**s) != "" {
         // TODO: recursive
     }
     Ok(Json(TreeResponse {
@@ -210,8 +208,7 @@ async fn create_tree(
         .base_tree
         .and_then(|h| gix_hash::ObjectId::from_hex(h.as_bytes()).ok())
         .and_then(|oid| crate::model::git::load(&tx, repo.network, &oid))
-        .map(|o| o.into_tree())
-        .unwrap_or(empty_tree);
+        .map_or(empty_tree, |o| o.into_tree());
     // make room for up to all the entries passed in
     tree.entries.reserve(req.tree.len());
 
@@ -363,8 +360,7 @@ async fn create_commit(
         email: user
             .email
             .as_ref()
-            .map(Cow::as_ref)
-            .unwrap_or("user@example.org")
+            .map_or("user@example.org", Cow::as_ref)
             .into(),
         time: gix_date::Time::now_utc(),
     };
@@ -474,9 +470,8 @@ async fn create_ref(
     if crate::model::git::refs::resolve(&tx, repo.id, &req.r#ref).is_some() {
         return Err(Error::unprocessable("Reference already exists", &[])
             .into_response("git", "refs", "create-a-reference"));
-    } else {
-        crate::model::git::refs::create(&tx, repo.id, &req.r#ref, &oid);
-    };
+    }
+    crate::model::git::refs::create(&tx, repo.id, &req.r#ref, &oid);
 
     let url = format!("{}/repos/{}/{}/git/{}", st.root, owner, name, req.r#ref);
     tx.commit().unwrap();
@@ -533,7 +528,7 @@ async fn list_refs(
                 obj.kind(),
                 oid.to_owned(),
             )),
-        })
+        });
     });
     Ok(Json(refs))
 }

@@ -420,7 +420,7 @@ where
         Ok(Value::String(s)) if s == "1" => Ok(true),
         _ => Err(()),
     }
-    .map_err(|_| {
+    .map_err(|()| {
         serde::de::Error::custom("Failed to deserialize boolean-ish (0 or 1)")
     })
 }

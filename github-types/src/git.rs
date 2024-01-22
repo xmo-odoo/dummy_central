@@ -101,17 +101,13 @@ impl CreateBlobRequest {
 
                 macro_rules! next {
                     ($v:ident <= $it:ident) => {
-                        let $v = if let Some(Some(x)) = $it.next() {
-                            x
-                        } else {
+                        let Some(Some($v)) = $it.next() else {
                             break;
                         };
                     };
                     ($v:ident <= $it:ident, skip) => {
                         let mut filtered = $it.by_ref().filter_map(|e| e);
-                        let $v = if let Some(x) = filtered.next() {
-                            x
-                        } else {
+                        let Some($v) = filtered.next() else {
                             break;
                         };
                     };

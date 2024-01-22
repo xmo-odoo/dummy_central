@@ -698,13 +698,13 @@ async fn get_commit(
         if let Ok(oid) = gix_hash::ObjectId::from_hex(commit_ref.as_bytes()) {
             oid
         } else {
-            let commit_ref: Cow<'_, _> = if !commit_ref.starts_with("refs/") {
+            let commit_ref: Cow<'_, _> = if commit_ref.starts_with("refs/") {
+                commit_ref.into()
+            } else {
                 // TODO: IIRC refs without the refs/ prefix behave oddly
                 //       in gh but I don't remember how so directly alias
                 //       them for now
                 format!("refs/{commit_ref}").into()
-            } else {
-                commit_ref.into()
             };
             if let Some(oid) =
                 crate::model::git::refs::resolve(tx, repo.id, &commit_ref)
@@ -903,8 +903,7 @@ async fn create_or_update_contents(
         email: user
             .email
             .as_ref()
-            .map(Cow::as_ref)
-            .unwrap_or("user@example.org")
+            .map_or("user@example.org", Cow::as_ref)
             .into(),
         time: Time::now_utc(),
     };
@@ -1153,8 +1152,7 @@ async fn create_branch_merge(
         email: user
             .email
             .as_ref()
-            .map(Cow::as_ref)
-            .unwrap_or("user@example.org")
+            .map_or("user@example.org", Cow::as_ref)
             .into(),
         time: Time::now_utc(),
     };

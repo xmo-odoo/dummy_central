@@ -12,11 +12,11 @@ use sha1::{Digest, Sha1};
 
 use super::{repos::Network, Token};
 
-/// gix_object's `loose_header` const size, not sure why 28 (I count about 12)
+/// [`gix_object`]'s `loose_header` const size, not sure why 28 (I count about 12)
 const HEADER_SIZE: usize = 28;
 
-/// Extacts the "sha" column from a [rusqlite::Row] and converts it to an
-/// [ObjectId]
+/// Extacts the `sha` column from a [`rusqlite::Row`] and converts it to a
+/// [`gix_object::ObjectId`]
 fn sha_to_oid(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectId> {
     <[u8; 20]>::try_from(row.get_ref("sha")?.as_blob()?)
         .map(ObjectId::from)
@@ -71,7 +71,7 @@ pub mod refs {
             Ok(())
         })
         .unwrap()
-        .for_each(Result::unwrap)
+        .for_each(Result::unwrap);
     }
 
     pub fn create(tx: &Token, repo: RepositoryId, name: &str, oid: &oid) {
@@ -85,7 +85,7 @@ pub mod refs {
             )
             .unwrap(),
             1
-        )
+        );
     }
 
     pub fn set(tx: &Token, repo: RepositoryId, name: &str, to: &oid) {
@@ -124,7 +124,7 @@ pub mod refs {
             )
             .unwrap(),
             1
-        )
+        );
     }
     pub fn delete(tx: &Token, repo: RepositoryId, name: &str, oid: &oid) {
         assert_eq!(
@@ -139,7 +139,7 @@ pub mod refs {
             )
             .unwrap(),
             1
-        )
+        );
     }
 
     pub fn delete_unchecked(
@@ -394,7 +394,7 @@ pub fn merge(
         let right_tree = resolve_tree_in(tx, network, right, &mut _right_buf)?;
 
         let mut changes1 = Recorder::default();
-        Changes::from(base.clone())
+        Changes::from(base)
             .needed_to_obtain(
                 left_tree,
                 State::default(),

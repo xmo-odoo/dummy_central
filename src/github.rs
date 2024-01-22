@@ -601,8 +601,7 @@ async fn create_repository(
             email: u
                 .email
                 .as_ref()
-                .map(Cow::as_ref)
-                .unwrap_or("user@example.org")
+                .map_or("user@example.org", Cow::as_ref)
                 .into(),
             time: gix_date::Time::now_utc(),
         };

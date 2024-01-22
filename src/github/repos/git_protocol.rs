@@ -122,10 +122,9 @@ async fn gix_refs(
         .ok_or(http::StatusCode::NOT_FOUND.into_response())?;
 
     let service = q
-        .map(|q| q.0)
-        .unwrap_or_else(|| Service {
+        .map_or_else(|| Service {
             service: String::from("git-upload-pack"),
-        })
+        }, |q| q.0)
         .service;
     // FIXME: private repos & auth for upload-pack (fetch) as well
     let mut capabilities = match service.as_str() {
@@ -146,7 +145,7 @@ async fn gix_refs(
         let mut resp = Vec::new();
         crate::model::git::refs::list(tx, repo.id, |refname, oid| {
             #[allow(clippy::write_with_newline)]
-            write!(&mut resp, "{}\t{}\n", oid, refname).unwrap();
+            write!(&mut resp, "{oid}\t{refname}\n").unwrap();
         });
         Ok(([("Content-Type", "text/plain;charset=utf-8".into())], resp))
     } else {
@@ -154,7 +153,7 @@ async fn gix_refs(
         let mut resp =
             format!("{service_len:04x}# service={service}\n0000").into_bytes();
         if protocol.and_then(|h| h.to_str().ok()) == Some("version=1") {
-            resp.extend(b"000eversion 1\n")
+            resp.extend(b"000eversion 1\n");
         }
         let default = format!("refs/heads/{}", repo.default_branch);
         if let Some(oid) =
