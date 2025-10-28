@@ -150,13 +150,21 @@ pub fn create_repository(
         )
         .unwrap()
     };
-    // the default branch name is set from the owner of the source,
-    // not the creator of the fork (or the source repo)
+    // When forking, the source repo's default branch is copied
     let repo_id = tx
         .query_row(
             "
         INSERT INTO repositories (owner, name, default_branch, parent, network)
-        VALUES (?1, ?2, (SELECT default_branch FROM users WHERE id = ?1), ?3, ?4)
+        VALUES (
+            ?1,
+            ?2,
+            CASE
+                WHEN ?3 IS NULL THEN (SELECT default_branch FROM users WHERE id = ?1)
+                ELSE (SELECT default_branch FROM repositories WHERE id = ?3)
+            END,
+            ?3,
+            ?4
+        )
         RETURNING id
     ",
             (*owner, name, parent.map(|(id, _)| *id), *network),

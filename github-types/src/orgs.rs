@@ -36,4 +36,5 @@ pub struct OrganizationFull {
     // issues_url: String,
     // members_url: String,
     // public_members_url: String,
+    pub default_repository_branch: String,
 }

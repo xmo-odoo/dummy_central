@@ -248,7 +248,7 @@ def test_restrict_update_contents(repo, create_ruleset):
             "foo.txt",
             "initial commit",
             "blorp",
-            "main",
+            repo.default_branch,
         )
     assert err.value.status == 409
     assert err.value.data == {
@@ -284,7 +284,7 @@ def test_rename_branch(repo, create_ruleset):
 
 
 def test_merge_branch(repo, create_ruleset):
-    head = repo.get_branch("main").commit.sha
+    head = repo.get_branch(repo.default_branch).commit.sha
     repo.create_git_ref(ref="refs/heads/feature-branch", sha=head)
 
     create_ruleset(
@@ -303,11 +303,11 @@ def test_merge_branch(repo, create_ruleset):
         }
     )
 
-    repo.merge("main", "feature-branch")
+    repo.merge(repo.default_branch, "feature-branch")
 
 
 def test_reference(repo, create_ruleset):
-    main = repo.get_git_ref("heads/main")
+    main = repo.get_git_ref(f"heads/{repo.default_branch}")
     repo.create_git_ref(ref="refs/heads/fgspiohfa", sha=main.object.sha)
 
     create_ruleset(
@@ -389,7 +389,7 @@ def test_restrict_push_create(
             "protocol.http.allow=always",
             "push",
             "origin",
-            "main:refs/heads/main2",
+            "HEAD:refs/heads/main2",
         ],
         check=True,
     )
@@ -423,7 +423,7 @@ def test_restrict_push_create(
             "protocol.http.allow=always",
             "push",
             "origin",
-            "main:refs/heads/main3",
+            "HEAD:refs/heads/main3",
         ],
         text=True,
         stderr=subprocess.PIPE,
@@ -442,6 +442,8 @@ def test_restrict_push_create(
 def test_restrict_push_update(
     request, create_ruleset, repo, config, users, user, tmp_path_factory, pattern
 ):
+    default_branch = repo.default_branch
+    pattern = pattern.replace('main', default_branch)
     if user != "base":
         non_admin_user = users(user).get_user()
         invite_user(request, repo, config['users'][user], non_admin_user)
@@ -490,8 +492,6 @@ def test_restrict_push_update(
             "-c",
             "protocol.http.allow=always",
             "push",
-            "origin",
-            "main",
         ],
         check=True,
     )
@@ -543,8 +543,6 @@ def test_restrict_push_update(
             "-c",
             "protocol.http.allow=always",
             "push",
-            "origin",
-            "main",
         ],
         text=True,
         stderr=subprocess.PIPE,
@@ -556,6 +554,6 @@ def test_restrict_push_update(
     else:
         assert p.returncode != 0
         assert p.stderr.startswith(
-            "remote: error: GH013: Repository rule violations found for refs/heads/main."
+            f"remote: error: GH013: Repository rule violations found for refs/heads/{default_branch}."
         )
         assert 'remote: - Cannot update this protected ref.' in p.stderr

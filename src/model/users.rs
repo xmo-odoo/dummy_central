@@ -75,6 +75,7 @@ pub struct User<'a> {
     pub name: Option<Cow<'a, str>>,
     /// "primary" email, iff public?
     pub email: Option<Cow<'a, str>>,
+    pub default_branch: String,
 }
 impl TryFrom<&'_ rusqlite::Row<'_>> for User<'static> {
     type Error = rusqlite::Error;
@@ -85,13 +86,14 @@ impl TryFrom<&'_ rusqlite::Row<'_>> for User<'static> {
             name: row.get::<_, Option<String>>("name")?.map(Into::into),
             r#type: row.get("type")?,
             email: row.get::<_, Option<String>>("email")?.map(Into::into),
+            default_branch: row.get::<_, String>("default_branch")?,
         })
     }
 }
 
 pub fn get_user<M>(tx: &Token<M>, login: &str) -> Option<User<'static>> {
     tx.query_row(
-        "SELECT id, login, type, name, email
+        "SELECT id, login, type, name, email, default_branch
         FROM users
         LEFT JOIN emails
            ON (user = users.id AND \"primary\" AND visibility = 'public')
@@ -109,7 +111,7 @@ pub fn get_user_from_email<M>(
     email: &str,
 ) -> Option<User<'static>> {
     tx.query_row(
-        "SELECT id, login, type, name, p.email
+        "SELECT id, login, type, name, p.email, default_branch
         FROM users
         LEFT JOIN emails e ON e.user = users.id
         LEFT JOIN emails p
@@ -129,7 +131,7 @@ pub fn get_user_from_email<M>(
 /// about that).
 pub fn get_by_id<M>(tx: &Token<M>, id: UserId) -> User<'static> {
     tx.query_row(
-        "SELECT id, login, type, name, email
+        "SELECT id, login, type, name, email, default_branch
         FROM users
         LEFT JOIN emails
            ON (user = users.id AND \"primary\" AND visibility = 'public')
@@ -145,7 +147,7 @@ pub fn get_by_id<M>(tx: &Token<M>, id: UserId) -> User<'static> {
 /// of the known world, the corresponding user may not exist.
 pub fn get_by_i64<M>(tx: &Token<M>, id: i64) -> Option<User<'static>> {
     tx.query_row(
-        "SELECT id, login, type, name, email
+        "SELECT id, login, type, name, email, default_branch
         FROM users
         LEFT JOIN emails
            ON (emails.user = users.id AND \"primary\" AND visibility = 'public')
@@ -164,7 +166,7 @@ pub fn find_current_user<M>(
     token: &str,
 ) -> Option<User<'static>> {
     tx.query_row(
-        "SELECT users.id, login, type, name, email
+        "SELECT users.id, login, type, name, email, default_branch
         FROM users
         JOIN tokens ON (users.id = tokens.user)
         LEFT JOIN emails

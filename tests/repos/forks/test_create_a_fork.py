@@ -18,9 +18,20 @@ def test_fork_empty(request, org):
     }
 
 
+def test_default_branch(request, session, user, org):
+    r = session.get(org.url).json()
+    if not (default := r.get('default_repository_branch')):
+        pytest.skip(
+            "read:org or organization:administration (read) token access are \
+                    required to check the default repository branch for an organization"
+        )
+
+    repo = check(request, org.create_repo(__name__, auto_init=True))
+    assert repo.default_branch == default
+
+
 def test_fork_from_org(request, user, org):
     repo = check(request, org.create_repo(__name__, auto_init=True))
-    # is the default branch here the org's? or the user's?
     new_default = repo.default_branch + "xxx"
     repo.create_git_ref(
         f"refs/heads/{new_default}", repo.get_branch(repo.default_branch).commit.sha
@@ -32,12 +43,7 @@ def test_fork_from_org(request, user, org):
     assert f.full_name == f'{user.login}/{__name__}'
     assert f.parent == f.source == repo
     assert f.fork is True
-    # FIXME: apparently the fork resets the default_branch to the *user's* (not org's),
-    #        and we have no way to get that information (except by creating a new repo
-    #        I guess...)
-    # assert f.default_branch == user_default
-    # TODO: how to make sure `new_default != user.default_branch`?
-    assert f.default_branch != new_default
+    assert f.default_branch == new_default
 
     f2 = repo.create_fork()
     assert f2.full_name == f.full_name, "forking twice into a user's account is a no-op"

@@ -668,6 +668,7 @@ async fn get_org(
                 public_repos: 0,
                 has_organization_projects: false,
                 has_repository_projects: false,
+                default_repository_branch: u.default_branch,
             })
         })
 }
