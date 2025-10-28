@@ -1,6 +1,6 @@
 use serde::Deserialize;
 
-pub fn unset<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+pub fn unset<'de, D, T>(de: D) -> Result<Option<T>, D::Error>
 where
     D: serde::de::Deserializer<'de>,
     T: Deserialize<'de>,
@@ -9,5 +9,5 @@ where
     // - unset => None
     // - set to null => Some(None)
     // - set to a value => Some(Some(v))
-    Ok(Some(Option::<T>::deserialize(de)?))
+    Ok(Some(<T>::deserialize(de)?))
 }

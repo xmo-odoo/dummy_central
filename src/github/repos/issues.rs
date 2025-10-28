@@ -13,7 +13,9 @@ use github_types::repos::{CommitsResponse, HookEvent};
 use github_types::{issues::*, pulls::*, webhooks};
 
 use crate::github::repos::send_hook;
-use crate::github::{Authorization, Config, Error, GHError, St};
+use crate::github::{
+    Authorization, Config, Error, GHError, GithubErrorDetails, St,
+};
 use crate::model::repos::id_by_name;
 use crate::model::users::User;
 use crate::model::{Read, Write};
@@ -1494,7 +1496,63 @@ async fn create_issue_comment(
         ));
     };
 
-    let comment_id = prs::create_comment(&tx, user.id, issue.id, &req.body);
+    let body = match req.body {
+        Some(serde_json::Value::String(s)) if s.is_empty() => {
+            const DETAILS: &[GithubErrorDetails<'_>] = &[Error::details(
+                "IssueComment",
+                "data",
+                "unprocessable",
+                "Body cannot be blank",
+            )];
+            return Err(Error::Unprocessable(
+                "Validation Failed".into(),
+                DETAILS,
+            )
+            .into_response(
+                "issues",
+                "comments",
+                "create-an-issue-comment",
+            ));
+        }
+        Some(serde_json::Value::String(s)) if s.len() > 262144 => {
+            const DETAILS: &[GithubErrorDetails<'_>] = &[Error::details(
+                "IssueComment",
+                "data",
+                "unprocessable",
+                "Body is too long (maximum is 65536 characters)",
+            )];
+            return Err(Error::Unprocessable(
+                "Validation Failed".into(),
+                DETAILS,
+            )
+            .into_response(
+                "issues",
+                "comments",
+                "create-an-issue-comment",
+            ));
+        }
+        Some(serde_json::Value::String(s)) => s,
+        Some(_) => {
+            // FIXME: should probably be the rubyfied version of the json value
+            return Err(Error::Unprocessable(
+                "Invalid request.\n\nFor 'properties/body', nil is not a string.".into(),
+                &[],
+            )
+            .into_response("issues", "comments", "create-an-issue-comment"));
+        }
+        None => {
+            return Err(Error::Unprocessable(
+                "Invalid request.\n\n\"body\" wasn't supplied.".into(),
+                &[],
+            )
+            .into_response(
+                "issues",
+                "comments",
+                "create-an-issue-comment",
+            ));
+        }
+    };
+    let comment_id = prs::create_comment(&tx, user.id, issue.id, &body);
     let comment = prs::get_comment(&tx, comment_id);
 
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {

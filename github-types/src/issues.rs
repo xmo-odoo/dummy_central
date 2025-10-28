@@ -186,5 +186,6 @@ pub struct IssueCommentResponse {
 
 #[derive(Deserialize, Debug)]
 pub struct CommentCreate {
-    pub body: String,
+    #[serde(default, deserialize_with = "crate::utils::unset")]
+    pub body: Option<serde_json::Value>,
 }

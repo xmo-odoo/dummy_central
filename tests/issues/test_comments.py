@@ -12,7 +12,7 @@ def event(action, e):
         return payload['issue'], payload['comment'], payload['changes']
 
 
-def test_issue_comments(repo, pr, endpoint, request, is_github):
+def test_issue_comments(session, repo, pr, endpoint, request, is_github):
     url, get_hook = endpoint
     h = repo.create_hook(
         "web",
@@ -77,3 +77,67 @@ def test_issue_comments(repo, pr, endpoint, request, is_github):
     issue, comment = event('deleted', get_hook())
     assert issue['number'] == pr.number
     assert comment['body'] == "this is absolute genius!"
+
+    r = session.post(pr.comments_url, json={})
+    assert r.status_code == 422, r.text
+    assert r.json() == {
+        "message": "Invalid request.\n\n\"body\" wasn't supplied.",
+        "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
+        "status": "422",
+    }
+    r = session.post(pr.comments_url, json={"body": None})
+    assert r.status_code == 422, r.text
+    assert r.json() == {
+        "message": "Invalid request.\n\nFor 'properties/body', nil is not a string.",
+        "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
+        "status": "422",
+    }
+    r = session.post(pr.comments_url, json={"body": ""})
+    assert r.status_code == 422, r.text
+    assert r.json() == {
+        "message": "Validation Failed",
+        "errors": [
+            {
+                "resource": "IssueComment",
+                "code": "unprocessable",
+                "field": "data",
+                "message": "Body cannot be blank",
+            }
+        ],
+        "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
+        "status": "422",
+    }
+    pr.create_issue_comment('a' * 262144)
+    with pytest.raises(GithubException) as ghe:
+        pr.create_issue_comment('a' * 262145)
+    assert ghe.value.status == 422
+    assert ghe.value.data == {
+        "message": "Validation Failed",
+        "errors": [
+            {
+                "resource": "IssueComment",
+                "code": "unprocessable",
+                "field": "data",
+                "message": "Body is too long (maximum is 65536 characters)",
+            }
+        ],
+        "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
+        "status": "422",
+    }
+    pr.create_issue_comment('🌈' * 65536)
+    with pytest.raises(GithubException) as ghe:
+        pr.create_issue_comment('🌈' * 65536 + 'a')
+    assert ghe.value.status == 422
+    assert ghe.value.data == {
+        "message": "Validation Failed",
+        "errors": [
+            {
+                "resource": "IssueComment",
+                "code": "unprocessable",
+                "field": "data",
+                "message": "Body is too long (maximum is 65536 characters)",
+            }
+        ],
+        "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
+        "status": "422",
+    }
