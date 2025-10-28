@@ -186,16 +186,16 @@ def test_fork_unauth(pytestconfig, request, user, org):
     assert ghe.value.status == 401
     assert ghe.value.data == {
         'status': '401',
-        "message": "You must be logged in to do that.",
-        "documentation_url": "https://docs.github.com/rest/guides/getting-started-with-the-rest-api#authentication",
+        "message": "Requires authentication",
+        "documentation_url": "https://docs.github.com/rest",
     }
     with pytest.raises(gh.GithubException) as ghe:
         unauth.create_fork(org.login)
     assert ghe.value.status == 401
     assert ghe.value.data == {
         'status': '401',
-        "message": "You must be logged in to do that.",
-        "documentation_url": "https://docs.github.com/rest/guides/getting-started-with-the-rest-api#authentication",
+        "message": "Requires authentication",
+        "documentation_url": "https://docs.github.com/rest",
     }
 
 

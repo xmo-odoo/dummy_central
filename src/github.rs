@@ -519,14 +519,8 @@ where
         .await
         .and_then(|r| match r {
             Some(r) => Ok(r),
-            None => {
-                Err(Error::Unauthenticated("You must be logged in to do that.")
-                    .into_response(
-                        "guides",
-                        "getting-started-with-the-rest-api",
-                        "authentication",
-                    ))
-            }
+            None => Err(Error::Unauthenticated("Requires authentication")
+                .into_response("", "", "")),
         })
     }
 }
@@ -688,7 +682,7 @@ const REPO_CREATION_FAILED: Error = Error::unprocessable(
 );
 #[instrument(skip(st, tx), err(Debug, level=Level::INFO))]
 async fn create_repository(
-    auth: Option<Authorization>,
+    auth: Authorization,
     State(st): State<St>,
     tx: Token<Write>,
     owner: Option<Path<String>>,
@@ -700,7 +694,7 @@ async fn create_repository(
     } else {
         "create-an-organization-repository"
     };
-    let Some(u) = auth.and_then(|a| auth_to_user(&tx, a)) else {
+    let Some(u) = auth_to_user(&tx, auth) else {
         return Err(Error::Unauthenticated("Requires authentication")
             .into_response("repos", "repos", endpoint));
     };

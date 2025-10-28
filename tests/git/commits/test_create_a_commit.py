@@ -23,11 +23,11 @@ def test_unlogged(repo, init):
             "tree": init.tree.sha,
         },
     )
-    assert r.status_code == 404, r.text
+    assert r.status_code == 401, r.text
     assert r.json() == {
-        "status": '404',
-        "message": "Not Found",
-        "documentation_url": "https://docs.github.com/rest/git/commits#create-a-commit",
+        "status": '401',
+        "message": "Requires authentication",
+        "documentation_url": "https://docs.github.com/rest",
     }
 
 

@@ -395,16 +395,14 @@ static FAILED_BOTH: &[GithubErrorDetails<'_>] = &[FAILED_NAME, FAILED_EMAIL];
 
 #[instrument(skip(st, tx))]
 async fn create_commit(
-    auth: Option<Authorization>,
+    auth: Authorization,
     State(st): State<St>,
     tx: Token<Write>,
     Path((owner, name)): Path<(String, String)>,
     Json(req): Json<Value>,
 ) -> Result<(http::StatusCode, Json<super::Commit>), GHError<'static>> {
-    // TODO: test error when trying to hit this endpoint unauth'd
-    let Some(user) =
-        auth.and_then(|auth| crate::github::auth_to_user(&tx, auth))
-    else {
+    // TODO: test error when trying to hit this endpoint with invalid auth
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::NOT_FOUND.into_response(
             "git",
             "commits",

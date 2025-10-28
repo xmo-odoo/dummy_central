@@ -386,15 +386,13 @@ async fn get_pull_request_commits(
 
 #[instrument(skip(st, tx))]
 async fn create_pull_request(
-    auth: Option<Authorization>,
+    auth: Authorization,
     State(st): State<St>,
     tx: Token<Write>,
     Path((owner, name)): Path<(String, String)>,
     Json(req): Json<PullRequestCreate>,
 ) -> Result<(http::StatusCode, Json<PullRequestResponse>), Response> {
-    let Some(user) =
-        auth.and_then(|auth| crate::github::auth_to_user(&tx, auth))
-    else {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
         return Err(Error::NOT_FOUND
             .into_response("pulls", "pulls", "create-a-pull-request")
             .into_response());

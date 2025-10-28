@@ -16,7 +16,7 @@ def test_create_no_user(pytestconfig, request):
     assert ghe.value.status == 401
     assert ghe.value.data == {
         'status': '401',
-        'documentation_url': 'https://docs.github.com/rest/repos/repos#create-a-repository-for-the-authenticated-user',
+        'documentation_url': 'https://docs.github.com/rest',
         'message': 'Requires authentication',
     }
 

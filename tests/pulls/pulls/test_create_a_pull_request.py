@@ -76,11 +76,11 @@ def test_basic(repo, session, endpoint, request, users, is_github, genbranch):
     repo_none = users(None).get_repo(repo.full_name)
     with pytest.raises(GithubException) as ghe:
         repo_none.create_pull(repo.default_branch, branchname, title="test")
-    assert ghe.value.status == 404
+    assert ghe.value.status == 401
     assert ghe.value.data == {
-        'status': '404',
-        "message": "Not Found",
-        "documentation_url": "https://docs.github.com/rest/pulls/pulls#create-a-pull-request",
+        'status': '401',
+        "message": "Requires authentication",
+        "documentation_url": "https://docs.github.com/rest",
     }
 
     pr = repo.create_pull(repo.default_branch, branchname, title="test")
