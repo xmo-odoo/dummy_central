@@ -1195,7 +1195,34 @@ async fn create_issue(
         repo_id,
         user.id,
         &req.title,
-        req.body.as_deref(),
+        req.body.filter(|b| !b.is_empty()).map(|b| {
+            if b.len() <= 65536 {
+                Ok(b)
+            } else {
+                const DETAILS: &[GithubErrorDetails<'static>] = &[
+                    Error::details(
+                        "Issue",
+                        "body",
+                        "invalid",
+                        "body is too long (maximum is 65536 characters).",
+                    ),
+                ];
+                Err(Error::UnprocessableValue("Validation Failed".into(), serde_json::json!([
+                    {
+                        "code": "invalid",
+                        "field": "body",
+                        "message": "body is too long (maximum is 65536 characters)",
+                        "resource": "Issue",
+                        "value": None::<()>,
+                    }
+                ]))
+                .into_response(
+                    "issues",
+                    "issues",
+                    "create-an-issue",
+                ))
+            }
+        }).transpose()?.as_deref(),
     );
     let issue = prs::get_issue(&tx, issue_id);
     tx.commit();

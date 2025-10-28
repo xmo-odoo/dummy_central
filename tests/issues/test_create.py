@@ -1,5 +1,6 @@
-import requests
 import github as pygithub
+import pytest
+import requests
 
 
 def test_create_with_number(
@@ -44,3 +45,32 @@ def test_create_with_number(
     #     "documentation_url":"https://docs.github.com/rest/issues/issues#create-an-issue",
     #     "status":"422",
     # }
+
+
+def test_create_empty_body(repo: pygithub.Repository) -> None:
+    i1 = repo.create_issue(title="foo")
+    assert i1.body is None
+    i2 = repo.create_issue(title="foo", body="")
+    assert i2.body is None
+
+
+def test_create_long_body(repo: pygithub.Repository) -> None:
+    i = repo.create_issue(title="foo", body="a" * 65536)
+    assert i.body == "a" * 65536
+    with pytest.raises(pygithub.GithubException) as ghe:
+        repo.create_issue(title="foo", body="a" * 65537)
+    assert ghe.value.status == 422
+    assert ghe.value.data == {
+        'documentation_url': 'https://docs.github.com/rest/issues/issues#create-an-issue',
+        'errors': [
+            {
+                'code': 'invalid',
+                'field': 'body',
+                'message': 'body is too long (maximum is 65536 characters)',
+                'resource': 'Issue',
+                'value': None,
+            }
+        ],
+        'message': 'Validation Failed',
+        'status': '422',
+    }
