@@ -1,0 +1,97 @@
+#!/usr/bin/env python3
+import atexit
+import json
+import os
+import shutil
+import subprocess
+import sys
+
+if len(sys.argv) > 1 and sys.argv[1] in ("--help", "-h"):
+    print("Usage: mkusers")
+    print()
+    print("""\
+Generates a users.json file for mergebot tests, using Bitwarden to retrieve
+the GH access configuration.
+
+GH access configuration must be stored in a folder called `mergebot-tests`,
+in which each item is a `login` with a GH username as item name, and custom
+fields specifying the corresponding github user account properties:
+
+- `login.username` should be set to an email for non-organization items
+  (unset for organizations)
+- a `role` custom field (`owner`, `user`, `reviewer`, `self_reviewer`, `other`)
+  WARNING: if using an organization it should have the role `owner`
+           and the `user` role should be an organization admin.
+- any number of `token` custom fields with github access tokens as values
+
+The best way to use this script is via ZSH process substitution:
+
+    =(./mkusers)
+
+as the classic bash process substitution (`<(./mkusers)`) seems to suppress
+whatever bitwarden uses for its interaction so it's impossible to unlock
+your vault. If not using ZSH it's probably best to unlock the vault and
+set `BW_SESSION` in such a way that `mkusers` can pick it up.
+""")
+    sys.exit(0)
+
+if shutil.which("bw") is None:
+    BWCMD = ["flatpak", "run", "--command=bw", "com.bitwarden.desktop", "--raw"]
+else:
+    BWCMD = ["bw", "--raw"]
+
+def bw(*args: str, **params) -> subprocess.CompletedProcess:
+    return subprocess.run(
+        [*BWCMD, "--raw", *args],
+        text=True,
+        stdout=subprocess.PIPE,
+        **params,
+    )
+
+if (session := os.environ.get("BW_SESSION")) \
+   and bw("unlock", "--check", "--quiet", "--session", session).returncode == 0:
+    # valid session in env
+    bw("sync", "--session", session, check=True)
+elif bw("login", "--check", "--quiet").returncode == 0:
+    r = bw("unlock")
+    if r.returncode or not r.stdout:
+        exit("unlock failed")
+    session = r.stdout
+    atexit.register(bw, "lock", "--session", session, check=True)
+    bw("sync", "--session", session, check=True)
+else:
+    r = bw("login")
+    if r.returncode or not r.stdout:
+        exit("login failed")
+    session = r.stdout
+    atexit.register(bw, "logout", "--session", session, check=True)
+
+r = bw("list", "folders", "--search", "mergebot-tests", "--session", session, check=True).stdout
+for folder in json.loads(r):
+    if folder['name'] == 'mergebot-tests':
+        folder_id = folder['id']
+        break
+else:
+    sys.exit("folder 'mergebot-tests' not found")
+
+r = bw("list", "items", "--folderid", folder_id, "--session", session, check=True).stdout
+users = {}
+for item in json.loads(r):
+    login = item['name']
+    email = item.get('login', {}).get('username')
+    role = None
+    tokens = []
+    for field in item['fields']:
+        if field['name'] == 'role':
+            role = field['value']
+        elif field['name'] == 'token':
+            tokens.append(field['value'])
+    if role is None:
+        sys.exit(f"No role set for {login}")
+    users[login] = {
+        "type": "Organization" if email is None else "User",
+        "role": role,
+        "token": tokens,
+        "email": email,
+    }
+print(json.dumps(users, indent=2))

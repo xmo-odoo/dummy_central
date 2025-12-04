@@ -1,5 +1,3 @@
-set positional-arguments
-
 default: format lint rlint test
 
 # formats the entire codebase
@@ -17,10 +15,11 @@ rlint:
 
 
 # validates the test suite against github actual, args are passed to pytest
-validate *args:
-    pytest -o cache_dir=.pytest-github --users=users.json "$@"
+validate users *args:
+    pytest -o cache_dir=.pytest-github --users={{users}} {{args}}
 
 # runs the test suite against a dummy_central instance (launched automatically), args are passed to pytest
+[positional-arguments]
 test *args:
     #!/bin/sh
     PORTFILE=$(mktemp -d)/portfile
