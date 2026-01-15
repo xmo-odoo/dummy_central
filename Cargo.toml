@@ -43,7 +43,7 @@ r2d2 = "*"
 r2d2_sqlite = "*"
 regex = "*"
 reqwest = { version = "*", features = ["json", "multipart"] }
-rusqlite = "*"
+rusqlite = { version = "*", features = ["bundled"] }
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 sha-1 = "*"
