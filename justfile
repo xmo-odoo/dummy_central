@@ -16,7 +16,7 @@ rlint:
 
 # validates the test suite against github actual, args are passed to pytest
 validate users *args:
-    pytest -o cache_dir=.pytest-github --users={{users}} {{args}}
+    uv run pytest -o cache_dir=.pytest-github --users={{users}} {{args}}
 
 # runs the test suite against a dummy_central instance (launched automatically), args are passed to pytest
 [positional-arguments]
@@ -39,7 +39,7 @@ test *args:
     fi
 
     PORT=$(head -n1 $PORTFILE)
-    pytest --base-url=http://127.0.0.1:$PORT --users=tests/users.json "$@"
+    uv run pytest --base-url=http://127.0.0.1:$PORT --users=tests/users.json "$@"
     RESULT=$?
 
     # TERM dummy_central, KILL it if it takes more than 5s to shut down
