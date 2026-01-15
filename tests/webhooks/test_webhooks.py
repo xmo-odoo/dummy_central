@@ -74,6 +74,7 @@ def test_hook_create(request, repo, session):
         pytest.fail("initial ping delivery never resolved")
     assert h.last_response.code in (
         403,
+        405,
         502,
     )  # sometimes example.org refuses to respond
     assert h.last_response.status is None
