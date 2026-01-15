@@ -5,7 +5,7 @@ from ... import check, safe_delete
 
 
 def test_fork_empty(request, org):
-    repo = check(request, org.create_repo(__name__))
+    repo = check(request, org.create_repo(request.function.__name__))
     with pytest.raises(gh.GithubException) as ghe:
         check(request, repo.create_fork())
 
@@ -26,12 +26,13 @@ def test_default_branch(request, session, user, org):
                     required to check the default repository branch for an organization"
         )
 
-    repo = check(request, org.create_repo(__name__, auto_init=True))
+    repo = check(request, org.create_repo(request.function.__name__, auto_init=True))
     assert repo.default_branch == default
 
 
 def test_fork_from_org(request, user, org):
-    repo = check(request, org.create_repo(__name__, auto_init=True))
+    reponame = request.function.__name__
+    repo = check(request, org.create_repo(reponame, auto_init=True))
     new_default = repo.default_branch + "xxx"
     repo.create_git_ref(
         f"refs/heads/{new_default}", repo.get_branch(repo.default_branch).commit.sha
@@ -40,7 +41,7 @@ def test_fork_from_org(request, user, org):
     assert repo.default_branch == new_default
 
     f = check(request, repo.create_fork())
-    assert f.full_name == f'{user.login}/{__name__}'
+    assert f.full_name == f'{user.login}/{reponame}'
     assert f.parent == f.source == repo
     assert f.fork is True
     assert f.default_branch == new_default
@@ -70,14 +71,15 @@ def test_fork_from_org(request, user, org):
 
 
 def test_fork_to_org(request, user, org):
-    repo = check(request, user.create_repo(__name__, auto_init=True))
+    reponame = request.function.__name__
+    repo = check(request, user.create_repo(reponame, auto_init=True))
 
     with pytest.raises(gh.GithubException) as ghe:
-        org.get_repo(__name__)
+        org.get_repo(reponame)
     assert ghe.value.status == 404, "the org should not have a test repo"
 
     f = check(request, repo.create_fork(org.login))
-    assert f.full_name == f'{org.login}/{__name__}'
+    assert f.full_name == f'{org.login}/{reponame}'
 
     with pytest.raises(gh.GithubException) as ghe:
         check(request, repo.create_fork('reasonably-sure-this-does-not-exist-69'))
@@ -91,10 +93,11 @@ def test_fork_to_org(request, user, org):
 
 
 def test_fork_to_org_already_exists(request, user, org):
-    repo = check(request, user.create_repo(__name__, auto_init=True))
+    reponame = request.function.__name__
+    repo = check(request, user.create_repo(reponame, auto_init=True))
 
-    existing = check(request, org.create_repo(__name__))
-    assert existing.full_name == f'{org.login}/{__name__}'
+    existing = check(request, org.create_repo(reponame))
+    assert existing.full_name == f'{org.login}/{reponame}'
     new = check(request, repo.create_fork(org.login))
     refork = check(request, repo.create_fork(org.login))
     assert (
@@ -110,18 +113,19 @@ def test_fork_to_org_already_exists(request, user, org):
 
 
 def test_fork_from_org_already_exists(request, user, org):
-    repo = check(request, org.create_repo(__name__, auto_init=True))
+    reponame = request.function.__name__
+    repo = check(request, org.create_repo(reponame, auto_init=True))
 
-    existing = check(request, user.create_repo(__name__))
-    assert existing.full_name == f'{user.login}/{__name__}'
+    existing = check(request, user.create_repo(reponame))
+    assert existing.full_name == f'{user.login}/{reponame}'
     new = check(request, repo.create_fork())
-    assert new.full_name == f'{user.login}/{__name__}-1', "should have renamed the fork"
+    assert new.full_name == f'{user.login}/{reponame}-1', "should have renamed the fork"
     refork = repo.create_fork()
     assert refork.full_name == new.full_name, "refork should land in the same place"
 
 
 def test_fork_self(request, user, org):
-    repo = check(request, user.create_repo(__name__, auto_init=True))
+    repo = check(request, user.create_repo(request.function.__name__, auto_init=True))
     new = repo.create_fork()
     assert new == repo
 
@@ -135,15 +139,16 @@ def test_fork_self(request, user, org):
 
 
 def test_fork_already_exists_extended(request, user, org):
-    repo = check(request, org.create_repo(__name__, auto_init=True))
+    reponame = request.function.__name__
+    repo = check(request, org.create_repo(reponame, auto_init=True))
 
     rs = [
         check(request, user.create_repo(n))
-        for n in [__name__, f'{__name__}-1', f'{__name__}-2']
+        for n in [reponame, f'{reponame}-1', f'{reponame}-2']
     ]
 
     new = check(request, repo.create_fork())
-    assert new.full_name == f'{user.login}/{__name__}-3', "should have renamed the fork"
+    assert new.full_name == f'{user.login}/{reponame}-3', "should have renamed the fork"
 
     new.edit(name='gloubiboulga')
     assert new.full_name == f'{user.login}/gloubiboulga'
@@ -163,26 +168,27 @@ def test_fork_already_exists_extended(request, user, org):
 
 
 def test_fork_suffixed(request, user, org):
-    repo = check(request, org.create_repo(f'{__name__}-1', auto_init=True))
+    reponame = request.function.__name__
+    repo = check(request, org.create_repo(f'{reponame}-1', auto_init=True))
 
     r = check(request, repo.create_fork(), delete=False)
-    assert r.full_name == f'{user.login}/{__name__}-1'
+    assert r.full_name == f'{user.login}/{reponame}-1'
     safe_delete(r)
 
-    whoops = check(request, user.create_repo(f'{__name__}-1'))
-    assert whoops.full_name == f'{user.login}/{__name__}-1'
+    whoops = check(request, user.create_repo(f'{reponame}-1'))
+    assert whoops.full_name == f'{user.login}/{reponame}-1'
 
     new = check(request, repo.create_fork())
-    assert new.full_name == f'{user.login}/{__name__}-2', "should have renamed the fork"
+    assert new.full_name == f'{user.login}/{reponame}-2', "should have renamed the fork"
 
-    repo = check(request, org.create_repo('{__name__}-9', auto_init=True))
-    check(request, user.create_repo('{__name__}-9'))
+    repo = check(request, org.create_repo(f'{reponame}-9', auto_init=True))
+    check(request, user.create_repo(f'{reponame}-9'))
     f = check(request, repo.create_fork())
-    assert f.full_name, f'{user.login}/{__name__}-10'
+    assert f.full_name, f'{user.login}/{reponame}-10'
 
 
 def test_fork_unauth(pytestconfig, request, user, org):
-    repo = check(request, user.create_repo(__name__, auto_init=True))
+    repo = check(request, user.create_repo(request.function.__name__, auto_init=True))
 
     unauth = gh.Github(base_url=pytestconfig.getoption('--base-url')).get_repo(
         repo.full_name
@@ -206,7 +212,7 @@ def test_fork_unauth(pytestconfig, request, user, org):
 
 
 def test_fork_branches(request, user, org):
-    repo = check(request, user.create_repo(__name__, auto_init=True))
+    repo = check(request, user.create_repo(request.function.__name__, auto_init=True))
     sha = repo.get_branch(repo.default_branch).commit.sha
     repo.create_git_ref(ref="refs/heads/a", sha=sha)
     repo.create_git_ref(ref="refs/heads/b", sha=sha)

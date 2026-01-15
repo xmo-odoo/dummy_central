@@ -14,7 +14,7 @@ def test_basic_flow():
 
 
 def test_invite_non_user(request, user, org):
-    r = check(request, user.create_repo(__name__, auto_init=True))
+    r = check(request, user.create_repo(request.function.__name__, auto_init=True))
     with pytest.raises(gh.GithubException) as ghe:
         r.add_to_collaborators("dummy-central-this-user-should-not-exist")
     assert ghe.value.status == 404
@@ -26,7 +26,7 @@ def test_invite_non_user(request, user, org):
 
 
 def test_invite_self(request, user):
-    r = check(request, user.create_repo(__name__, auto_init=True))
+    r = check(request, user.create_repo(request.function.__name__, auto_init=True))
     with pytest.raises(gh.GithubException) as ghe:
         r.add_to_collaborators(user.login)
     assert ghe.value.status == 422
