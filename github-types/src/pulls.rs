@@ -111,6 +111,15 @@ pub struct PullRequestHead {
 }
 #[derive(Serialize, Debug)]
 pub struct PullRequestBase {
+    /// Useless, as far as I can tell, this is none of:
+    ///
+    /// - the merge-base (which would be super duper useful)
+    /// - the current HEAD of the base (though that's what DC
+    ///   currently returns)
+    /// - whatever the HEAD of the base was at PR creation
+    ///   (kinda looked like that but I found counter-examples)
+    ///
+    /// So I've no clue what this is supposed to be.
     pub sha: String,
     pub label: String,
     pub r#ref: String,
