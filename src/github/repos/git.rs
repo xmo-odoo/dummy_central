@@ -702,7 +702,7 @@ async fn get_ref(
         return Err(Error::NOT_FOUND.into_response(
             "git",
             "refs",
-            "get-all-references-in-a-namespace",
+            "get-a-reference",
         ));
     };
 
@@ -712,7 +712,7 @@ async fn get_ref(
         return Err(Error::NOT_FOUND.into_response(
             "git",
             "refs",
-            "get-all-references-in-a-namespace",
+            "get-a-reference",
         ));
     };
     let obj = crate::model::git::load(&tx, repo.network, &oid)

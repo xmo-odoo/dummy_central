@@ -31,7 +31,7 @@ def test_get_refs(repo, endpoint, session):
     assert ghe.value.status == 404
     assert ghe.value.data == {
         'status': '404',
-        'documentation_url': 'https://docs.github.com/rest/git/refs#get-all-references-in-a-namespace',
+        'documentation_url': 'https://docs.github.com/rest/git/refs#get-a-reference',
         'message': 'Not Found',
     }
 
