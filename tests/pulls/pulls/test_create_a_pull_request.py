@@ -29,7 +29,8 @@ def test_basic(repo, session, endpoint, request, users, is_github, genbranch):
 
     d = repo.get_commit(f'refs/heads/{repo.default_branch}')
     d_head = d.commit
-    repo.create_git_ref('refs/heads/main2', d_head.sha)
+    r = repo.create_git_ref('refs/heads/main2', d_head.sha)
+    request.addfinalizer(r.delete)
     t = repo.create_git_tree(
         [
             item('foo', '100644', 'blob', 'blorp'),
@@ -38,7 +39,8 @@ def test_basic(repo, session, endpoint, request, users, is_github, genbranch):
     )
     c = repo.create_git_commit("a commit", t, [d_head])
     branchname = genbranch()
-    repo.create_git_ref(f'refs/heads/{branchname}', c.sha)
+    r = repo.create_git_ref(f'refs/heads/{branchname}', c.sha)
+    request.addfinalizer(r.delete)
 
     with pytest.raises(GithubException) as ghe:
         repo.create_pull(repo.default_branch, "does-not-exist-69", title="test")
