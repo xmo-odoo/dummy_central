@@ -78,12 +78,23 @@ def test_basic(repo, session, endpoint, request, users, is_github, genbranch):
     repo_none = users(None).get_repo(repo.full_name)
     with pytest.raises(GithubException) as ghe:
         repo_none.create_pull(repo.default_branch, branchname, title="test")
-    assert ghe.value.status == 401
-    assert ghe.value.data == {
-        'status': '401',
-        "message": "Requires authentication",
-        "documentation_url": "https://docs.github.com/rest",
-    }
+    # inconsistent behavior, github actual can return both 401 and 404
+    # (majority 401 by far)
+    match ghe.value.status:
+        case 401:
+            assert ghe.value.data == {
+                'status': '401',
+                "message": "Requires authentication",
+                "documentation_url": "https://docs.github.com/rest",
+            }
+        case 404:
+            assert ghe.value.data == {
+                'status': '404',
+                'documentation_url': 'https://docs.github.com/rest/pulls/pulls#create-a-pull-request',
+                'message': "Not Found",
+            }
+        case s:
+            pytest.fail(f"unexpected status {s} ({ghe.value.data})")
 
     pr = repo.create_pull(repo.default_branch, branchname, title="test")
     assert pr.state == 'open'
