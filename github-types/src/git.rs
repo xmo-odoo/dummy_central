@@ -50,15 +50,11 @@ impl From<gix_actor::SignatureRef<'_>> for Authorship {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub enum BlobEncoding {
     Base64,
+    #[default]
     Text,
-}
-impl Default for BlobEncoding {
-    fn default() -> Self {
-        Self::Text
-    }
 }
 impl<'de> Deserialize<'de> for BlobEncoding {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>

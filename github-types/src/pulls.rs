@@ -295,14 +295,11 @@ pub struct ReviewCommentStart {
 }
 #[derive(Deserialize, Debug)]
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+#[derive(Default)]
 pub enum ReviewCommentSide {
     Left,
+    #[default]
     Right,
-}
-impl Default for ReviewCommentSide {
-    fn default() -> Self {
-        Self::Right
-    }
 }
 
 #[derive(Deserialize, Debug)]

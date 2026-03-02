@@ -511,19 +511,16 @@ where
 }
 #[derive(Serialize, Deserialize, Debug, Copy, Clone)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum HookContentType {
     /// JSON payload set as the `payload` key of an
     /// application/x-www-form-urlencoded
+    #[default]
     Form,
     /// JSON payload as-is
     Json,
 }
 
-impl Default for HookContentType {
-    fn default() -> Self {
-        Self::Form
-    }
-}
 impl HookContentType {
     pub fn as_str(&self) -> &'static str {
         match self {
@@ -725,15 +722,12 @@ pub enum CreateRepositoryRulesetBypassActorType {
 
 #[derive(Serialize, Deserialize, Debug)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum CreateRepositoryRulesetBypassActorMode {
+    #[default]
     Allow,
     // only applicable for branches, not applicable for DeployKey
     PullRequest,
-}
-impl Default for CreateRepositoryRulesetBypassActorMode {
-    fn default() -> Self {
-        Self::Allow
-    }
 }
 
 #[derive(Deserialize, Serialize)]

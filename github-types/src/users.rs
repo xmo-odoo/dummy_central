@@ -2,15 +2,13 @@ use std::borrow::Cow;
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(
+    Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq, Default,
+)]
 pub enum UserType {
+    #[default]
     User,
     Organization,
-}
-impl Default for UserType {
-    fn default() -> Self {
-        Self::User
-    }
 }
 #[derive(Serialize, Default)]
 pub struct PublicUser {
@@ -95,12 +93,9 @@ pub struct Email {
 }
 #[derive(Serialize, Deserialize, Copy, Clone)]
 #[serde(rename_all = "snake_case")]
+#[derive(Default)]
 pub enum Visibility {
+    #[default]
     Public,
     Private,
-}
-impl Default for Visibility {
-    fn default() -> Self {
-        Self::Public
-    }
 }
