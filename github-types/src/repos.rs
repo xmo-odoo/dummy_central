@@ -13,6 +13,7 @@ pub enum Visibility {
     Private,
     // Internal, // GHE only
 }
+#[allow(clippy::struct_excessive_bools)]
 #[derive(Serialize, Default, Clone, Debug)]
 pub struct RepositoryResponse {
     /// Unique identifier of the repository
@@ -219,7 +220,7 @@ pub struct CombinedCommitStatus {
 #[derive(Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum CombinedCommitStatusState {
-    /// If there are no statuses or any context is [``StatusState::Pending`].
+    /// If there are no statuses or any context is [`StatusState::Pending`].
     Pending,
     /// If the latest status for all contexts is [`StatusState::Success`].
     Success,
@@ -322,7 +323,7 @@ pub struct DiffEntry {
     raw_url: String,
     contents_url: String,
     /// unifified diff text for the change (TODO: when's it left out?
-    /// Should this be skip_serializing_if = String::is_empty?)
+    /// Should this be `skip_serializing_if = String::is_empty`?)
     patch: Option<String>,
     /// the previous filename, if the file was renamed (TODO: check)
     previous_filename: Option<String>,
@@ -378,8 +379,8 @@ pub struct CreateHook {
     pub active: bool,
 }
 
-/// .paths."/repos/{owner}/{repo}/hooks/{hook_id}".patch
-///     .requestBody.content."application/json".schema.properties
+/// `.paths."/repos/{owner}/{repo}/hooks/{hook_id}".patch
+///     .requestBody.content."application/json".schema.properties`
 #[derive(Deserialize, Debug, Default)]
 #[serde(default)]
 pub struct UpdateHook {
@@ -393,7 +394,7 @@ pub struct UpdateHook {
     /// Determines what [events](https://docs.github.com/webhooks/event-payloads)
     /// the hook is triggered for. This replaces the entire array of events.
     ///
-    /// NB: default = ["push"]???
+    /// NB: `default = ["push"]`?
     pub events: BTreeSet<HookEvent>,
     /// Determines a list of events to be added to the list of events that
     /// the Hook triggers for.
@@ -499,6 +500,7 @@ pub struct CreateHookConfig {
     )]
     pub insecure_ssl: bool,
 }
+#[allow(clippy::trivially_copy_pass_by_ref)]
 fn dumbbool<S>(&v: &bool, s: S) -> Result<S::Ok, S::Error>
 where
     S: Serializer,
@@ -530,8 +532,8 @@ impl HookContentType {
     }
 }
 
-/// Deserialize insecure_ssl which is semantically a boolean flag but
-/// can be set via an integer or a string
+/// Deserialize `insecure_ssl` which is semantically a boolean flag
+/// but can be set via an integer or a string
 fn boolish<'de, D>(d: D) -> Result<bool, D::Error>
 where
     D: serde::de::Deserializer<'de>,
@@ -811,6 +813,7 @@ pub struct RulesetResponseShort {
     pub links: RulesetLinks,
 }
 
+#[allow(clippy::pub_underscore_fields)]
 #[derive(Serialize)]
 pub struct RulesetResponse {
     #[serde(flatten)]

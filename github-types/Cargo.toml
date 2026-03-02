@@ -15,3 +15,6 @@ hex = "*"
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
 chrono = "*"
+
+[lints]
+workspace = true

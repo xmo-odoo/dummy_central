@@ -52,6 +52,7 @@ pub struct Label {
     pub default: bool,
 }
 
+#[allow(clippy::pub_underscore_fields, clippy::struct_excessive_bools)]
 #[derive(Serialize, Debug)]
 pub struct IssueResponse {
     pub id: i64,

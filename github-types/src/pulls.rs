@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use super::issues::{AuthorAssociation, IssueState, Label};
 use crate::users::SimpleUser;
 
+#[allow(clippy::pub_underscore_fields, clippy::struct_excessive_bools)]
 #[derive(Serialize, Debug)]
 pub struct PullRequestResponse {
     pub id: i64, // ??? wtf?
@@ -130,6 +131,7 @@ pub struct PullRequestBase {
 fn default_true() -> bool {
     true
 }
+#[allow(clippy::pub_underscore_fields)]
 #[derive(Deserialize, Debug)]
 pub struct PullRequestCreate {
     pub head: String,
@@ -257,6 +259,7 @@ impl TryFrom<&String> for ReviewState {
     }
 }
 
+#[allow(clippy::pub_underscore_fields)]
 #[derive(Deserialize, Debug)]
 pub struct ReviewComment {
     pub body: String,
@@ -302,6 +305,7 @@ pub enum ReviewCommentSide {
     Right,
 }
 
+#[allow(clippy::pub_underscore_fields)]
 #[derive(Deserialize, Debug)]
 pub struct CreateReviewCommentRequest {
     // TODO does this really make sense if `InReplyTo`?
