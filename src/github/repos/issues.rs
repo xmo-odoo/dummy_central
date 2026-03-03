@@ -196,6 +196,7 @@ fn issues_router() -> Router<St> {
         .route("/{number}/labels/{name}", delete(delete_issue_label))
         .route("/{number}/comments", get(get_issue_comments).post(create_issue_comment))
         .route("/comments/{id}", get(get_issue_comment).patch(update_issue_comment).delete(delete_issue_comment))
+        .route("/comments/{id}/reactions", get(get_issue_comment_reactions).post(create_issue_comment_reaction))
         .route("/{number}/assignees", post(add_assignees).delete(remove_assignees))
         //.route("/{number}/assignees/{assignee}", get(check_can_be_assigned)
 }
@@ -1827,6 +1828,95 @@ async fn delete_issue_comment(
     tx.commit();
     Ok(http::StatusCode::NO_CONTENT)
 }
+
+#[derive(Deserialize)]
+struct Reaction {
+    // TODO: this should be an enum so it doesn't need to be validated
+    //       downstream, but serde validation is not amazing
+    content: String,
+}
+
+#[derive(serde::Serialize)]
+struct IssueCommentReaction {
+    // id: int64,
+    // nodeid: ???
+    user: github_types::users::PublicUser,
+    content: String,
+    // created_at: String,
+}
+
+#[instrument(skip(tx))]
+async fn create_issue_comment_reaction(
+    auth: Authorization,
+    tx: Token<Write>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+    Json(Reaction { content }): Json<Reaction>,
+) -> Result<Json<IssueCommentReaction>, GHError<'static>> {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+        return Err(Error::Unauthenticated("").into_response(
+            "reactions",
+            "reactions",
+            "create-reaction-for-an-issue-comment",
+        ));
+    };
+    let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
+        return Err(Error::NOT_FOUND.into_response(
+            "reactions",
+            "reactions",
+            "create-reaction-for-an-issue-comment",
+        ));
+    };
+    let Some(comment) = prs::get_comment_by_i64(&tx, repo_id, comment_id)
+    else {
+        return Err(Error::NOT_FOUND.into_response(
+            "reactions",
+            "reactions",
+            "create-reaction-for-an-issue-comment",
+        ));
+    };
+
+    if prs::add_reaction(&tx, comment.id, user.id, &content) {
+        tx.commit();
+        Ok(Json(IssueCommentReaction { user: user.into(), content }))
+    } else {
+        Err(Error::unprocessable("Validation Failed", &[]).into_response(
+            "reactions",
+            "reactions",
+            "create-reaction-for-an-issue-comment",
+        ))
+    }
+}
+
+#[instrument(skip(tx))]
+async fn get_issue_comment_reactions(
+    tx: Token<Read>,
+    Path((owner, name, comment_id)): Path<(String, String, i64)>,
+) -> Result<Json<Vec<IssueCommentReaction>>, GHError<'static>> {
+    let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
+        return Err(Error::NOT_FOUND.into_response(
+            "reactions",
+            "reactions",
+            "list-reactions-for-an-issue-comment",
+        ));
+    };
+    let Some(comment) = prs::get_comment_by_i64(&tx, repo_id, comment_id)
+    else {
+        return Err(Error::NOT_FOUND.into_response(
+            "reactions",
+            "reactions",
+            "list-reactions-for-an-issue-comment",
+        ));
+    };
+
+    Ok(Json(prs::reactions(&tx, comment.id).into_iter().map(|r| {
+        let user = crate::model::users::get_by_id(&tx, r.user).into();
+        IssueCommentReaction {
+            user,
+            content: r.reaction,
+        }
+    }).collect()))
+}
+
 
 #[derive(Deserialize)]
 struct Assignees {

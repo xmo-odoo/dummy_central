@@ -141,3 +141,28 @@ def test_issue_comments(session, repo, pr, endpoint, request, is_github):
         "documentation_url": "https://docs.github.com/rest/issues/comments#create-an-issue-comment",
         "status": "422",
     }
+
+def test_reaction(repo, pr, users):
+    u = users('base')
+    c = pr.create_issue_comment("this is absolute nonsense!")
+    c.create_reaction('+1')
+    c.create_reaction('eyes')
+    with pytest.raises(GithubException) as ghe:
+        c.create_reaction('gloubi')
+    assert ghe.value.status == 422
+    # I don't really want to test the exact error message
+
+    uu = users('c')
+    cc = uu.get_repo(repo.full_name).get_issue(pr.number).get_comment(c.id)
+    cc.create_reaction('eyes')
+    cc.create_reaction('rocket')
+
+    assert [
+        (r.user.login, r.content)
+        for r in c.get_reactions()
+    ] == [
+        (u.get_user().login, '+1'),
+        (u.get_user().login, 'eyes'),
+        (uu.get_user().login, 'eyes'),
+        (uu.get_user().login, 'rocket')
+    ]

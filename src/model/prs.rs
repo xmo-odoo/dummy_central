@@ -384,6 +384,38 @@ pub fn delete_comment(tx: &Token<Write>, comment: CommentId) {
         .expect("sql execution to succeed");
 }
 
+pub fn add_reaction(
+    tx: &Token<Write>,
+    comment: CommentId,
+    user: UserId,
+    reaction: &str,
+) -> bool {
+    tx.execute(
+        "
+INSERT INTO issue_comments_reactions (comment, user, reaction) VALUES (?, ?, ?)
+",
+        (*comment, *user, reaction),
+    ).is_ok()
+}
+
+pub struct Reaction {
+    pub user: UserId,
+    pub comment: CommentId,
+    pub reaction: String,
+}
+pub fn reactions<M>(tx: &Token<M>, comment: CommentId) -> Vec<Reaction> {
+    tx.prepare(
+        "SELECT user, reaction FROM issue_comments_reactions WHERE comment = ? ORDER BY rowid",
+    ).expect("query to be valid")
+        .query_map([*comment], |row| Ok(Reaction {
+            comment,
+            user: row.get(0).map(UserId)?,
+            reaction: row.get(1)?,
+        })).expect("sql execution to succeed")
+        .map(|r| r.expect("nothing to go wrong"))
+        .collect()
+}
+
 pub fn create_pr(
     tx: &Token<Write>,
     issue: IssueId,

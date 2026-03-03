@@ -163,7 +163,6 @@ CREATE TABLE issue_labels (
     unique(issue, label)
 ) STRICT;
 
-
 CREATE TABLE issue_comments (
     id integer primary key,
     issue integer not null references issues on delete cascade,
@@ -172,6 +171,14 @@ CREATE TABLE issue_comments (
 
     created_at text not null default (datetime()),
     updated_at text not null default (datetime())
+) STRICT;
+
+CREATE TABLE issue_comments_reactions (
+   comment integer not null references issue_comments on delete cascade,
+   user integer not null references users on delete cascade,
+   reaction text not null check(reaction in ('+1', '-1', 'laugh', 'confused', 'heart', 'hooray', 'rocket', 'eyes')),
+
+   unique(comment, user, reaction)
 ) STRICT;
 
 CREATE TABLE assignees (
