@@ -17,7 +17,7 @@ use crate::github::{
     Authorization, Config, Error, GHError, GithubErrorDetails, St,
 };
 use crate::model::repos::id_by_name;
-use crate::model::users::User;
+use crate::model::users::{self, User};
 use crate::model::{Read, Write};
 use crate::model::{
     Token,
@@ -43,7 +43,7 @@ pub struct Issue {
     pub author_association: AuthorAssociation,
     // milestone: (),
     // assignee: Option<SimpleUser>
-    // assignees: Option<Vec<SimpleUser>>
+    pub assignees: Vec<User<'static>>,
     pub comments: Vec<IssueComment<'static>>,
     // indicates whether this is a PR, and contains the PR-specific info
     pub pull_request: Option<()>, // FIXME: Option<PullRequest>,
@@ -98,6 +98,7 @@ impl Issue {
             user: None,
             labels: Vec::new(),
             author_association: AuthorAssociation::None,
+            assignees: Vec::new(),
             comments: Vec::new(),
             pull_request: None,
             //pull_request: Some(PullRequest {
@@ -131,8 +132,13 @@ impl Issue {
             title: self.title.clone(),
             body: self.body.clone(),
             locked: false,
-            user: None,
+            user: self.user.map(|u| u.to_simple(root)),
             author_association: AuthorAssociation::None,
+            assignees: self
+                .assignees
+                .into_iter()
+                .map(|u| u.to_simple(root))
+                .collect(),
             comments: 0,
             pull_request: None,
         }
@@ -190,6 +196,8 @@ fn issues_router() -> Router<St> {
         .route("/{number}/labels/{name}", delete(delete_issue_label))
         .route("/{number}/comments", get(get_issue_comments).post(create_issue_comment))
         .route("/comments/{id}", get(get_issue_comment).patch(update_issue_comment).delete(delete_issue_comment))
+        .route("/{number}/assignees", post(add_assignees).delete(remove_assignees))
+        //.route("/{number}/assignees/{assignee}", get(check_can_be_assigned)
 }
 
 #[rustfmt::skip]
@@ -1089,6 +1097,10 @@ fn to_issue_response<M>(
         locked: false,
         user: issue.user.map(|u| u.to_simple(&st.root)),
         author_association: AuthorAssociation::None,
+        assignees: prs::assignees(tx, issue.repository.id, issue.id)
+            .into_iter()
+            .map(|uid| users::get_by_id(tx, uid).to_simple(&st.root))
+            .collect(),
         comments: 0,
         pull_request: prs::find_by_number(tx, (owner, name), issue.number)
             .map(|p| pr_response(tx, st, p)),
@@ -1225,33 +1237,10 @@ async fn create_issue(
         }).transpose()?.as_deref(),
     );
     let issue = prs::get_issue(&tx, issue_id);
+    let issue = to_issue_response(&tx, &st, &owner, &name, issue);
     tx.commit();
 
-    Ok((
-        http::StatusCode::CREATED,
-        Json(IssueResponse {
-            id: *issue.id,
-            node_id: String::new(),
-            _urls: IssueResponseUrls {
-                url: format!(
-                    "{}/repos/{}/{}/issues/{}",
-                    st.root, owner, name, issue.number,
-                ),
-            },
-            number: issue.number,
-            state: match issue.state {
-                prs::State::Open => IssueState::Open,
-                prs::State::Closed => IssueState::Closed,
-            },
-            title: issue.title,
-            body: issue.body,
-            locked: false,
-            user: issue.user.map(|u| u.to_simple(&st.root)),
-            author_association: AuthorAssociation::None,
-            comments: 0,
-            pull_request: None,
-        }),
-    ))
+    Ok((http::StatusCode::CREATED, Json(issue)))
 }
 
 fn label_to_label(
@@ -1582,6 +1571,7 @@ async fn create_issue_comment(
     let comment_id = prs::create_comment(&tx, user.id, issue.id, &body);
     let comment = prs::get_comment(&tx, comment_id);
 
+    let repo_id = repo.id;
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {
         let mut issue_response = Issue {
             number: issue.number,
@@ -1594,6 +1584,10 @@ async fn create_issue_comment(
             title: issue.title.clone(),
             body: issue.body.clone(),
             comments: Vec::new(),
+            assignees: prs::assignees(&tx, repo_id, issue.id)
+                .into_iter()
+                .map(|uid| users::get_by_id(&tx, uid))
+                .collect(),
             labels: Vec::new(),
             pull_request: None,
         }
@@ -1718,6 +1712,7 @@ async fn update_issue_comment(
         created_at: comment.created_at.clone(),
         updated_at: comment.updated_at.clone(),
     };
+    let repo_id = repo.id;
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {
         let mut issue_response = Issue {
             number: issue.number,
@@ -1730,6 +1725,10 @@ async fn update_issue_comment(
             title: issue.title.clone(),
             body: issue.body.clone(),
             comments: Vec::new(),
+            assignees: prs::assignees(&tx, repo_id, issue.id)
+                .into_iter()
+                .map(|uid| users::get_by_id(&tx, uid))
+                .collect(),
             labels: Vec::new(),
             pull_request: None,
         }
@@ -1788,6 +1787,7 @@ async fn delete_issue_comment(
 
     prs::delete_comment(&tx, comment.id);
 
+    let repo_id = repo.id;
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {
         let mut issue_response = Issue {
             number: issue.number,
@@ -1800,6 +1800,10 @@ async fn delete_issue_comment(
             title: issue.title.clone(),
             body: issue.body.clone(),
             comments: Vec::new(),
+            assignees: prs::assignees(&tx, repo_id, issue.id)
+                .into_iter()
+                .map(|uid| users::get_by_id(&tx, uid))
+                .collect(),
             labels: Vec::new(),
             pull_request: None,
         }
@@ -1822,4 +1826,92 @@ async fn delete_issue_comment(
     });
     tx.commit();
     Ok(http::StatusCode::NO_CONTENT)
+}
+
+#[derive(Deserialize)]
+struct Assignees {
+    assignees: Vec<String>,
+}
+#[instrument(skip(st, tx))]
+async fn add_assignees(
+    auth: Authorization,
+    State(st): State<St>,
+    tx: Token<Write>,
+    Path((owner, name, number)): Path<(String, String, usize)>,
+    Json(Assignees { assignees }): Json<Assignees>,
+) -> Result<(http::StatusCode, Json<IssueResponse>), GHError<'static>> {
+    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+        // TODO: ?
+        return Err(Error::Unauthenticated("").into_response(
+            "issues",
+            "assignees",
+            "add-assignees-to-an-issue",
+        ));
+    };
+    let Some(issue_id) = prs::find_issue_id(&tx, &owner, &name, number) else {
+        // TODO: what do you get if you try to add an assignee to a
+        //       repo / id which does not exist?
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "assignees",
+            "add-assignees-to-an-issue",
+        ));
+    };
+    let issue = prs::get_issue(&tx, issue_id);
+    let comment_authors = prs::get_comments(&tx, issue_id, |c| c.author)
+        .into_iter()
+        .flatten()
+        .collect::<HashSet<_>>();
+    assignees
+        .into_iter()
+        .filter_map(|login| users::get_user(&tx, &login))
+        .filter(|c| {
+            c.id == user.id
+                || Some(c.id) == issue.user.as_ref().map(|a| a.id)
+                || comment_authors.contains(&c.id)
+                || false // can_write(repo)
+                || false // org_can_read(repo)
+        })
+        .for_each(|c| prs::assign(&tx, issue_id, c.id));
+    let issue = prs::get_issue(&tx, issue_id);
+    let r = to_issue_response(&tx, &st, &owner, &name, issue);
+    tx.commit();
+    Ok((http::StatusCode::CREATED, Json(r)))
+}
+
+#[instrument(skip(st, tx))]
+async fn remove_assignees(
+    auth: Authorization,
+    State(st): State<St>,
+    tx: Token<Write>,
+    Path((owner, name, number)): Path<(String, String, usize)>,
+    Json(Assignees { assignees }): Json<Assignees>,
+) -> Result<Json<IssueResponse>, GHError<'static>> {
+    let Some(_) = crate::github::auth_to_user(&tx, auth) else {
+        // TODO: ?
+        return Err(Error::Unauthenticated("").into_response(
+            "issues",
+            "assignees",
+            "add-assignees-to-an-issue",
+        ));
+    };
+    let Some(issue_id) = prs::find_issue_id(&tx, &owner, &name, number) else {
+        // TODO: what do you get if you try to add an assignee to a
+        //       repo / id which does not exist?
+        return Err(Error::NOT_FOUND.into_response(
+            "issues",
+            "assignees",
+            "remove-assignees-from-an-issue",
+        ));
+    };
+    for user in assignees
+        .into_iter()
+        .filter_map(|login| users::get_user(&tx, &login))
+    {
+        prs::unassign(&tx, issue_id, user.id);
+    }
+    let issue = prs::get_issue(&tx, issue_id);
+    let r = to_issue_response(&tx, &st, &owner, &name, issue);
+    tx.commit();
+    Ok(Json(r))
 }

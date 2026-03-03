@@ -76,7 +76,7 @@ pub struct IssueResponse {
     // closed_by: Option<SimpleUser>,
     // is this just the first of assignees?
     // assignee: Option<SimpleUser>,
-    // assignees: Vec<SimpleUser>,
+    pub assignees: Vec<SimpleUser>,
     // requested_reviewers: Vec<SimpleUser>,
     // requested_teams: Vec<SimpleTeam>,
     pub author_association: AuthorAssociation,

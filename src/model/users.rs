@@ -57,7 +57,7 @@ impl FromSql for Type {
 }
 
 // FIXME: how to make sure we create UserId only from fks to users?
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct UserId(pub i64);
 impl std::ops::Deref for UserId {
     type Target = i64;

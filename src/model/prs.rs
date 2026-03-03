@@ -695,6 +695,34 @@ WHERE id = ?
     .expect("sql execution to succeed");
 }
 
+pub fn assignees<M>(
+    tx: &Token<M>,
+    _: RepositoryId,
+    issue: IssueId,
+) -> Vec<UserId> {
+    tx.prepare("SELECT user FROM assignees WHERE issue = ?")
+        .expect("query to be valid")
+        .query_map([*issue], |row| row.get(0).map(UserId))
+        .expect("sql execution to succeed")
+        .map(|r| r.expect("nothing to go wrong"))
+        .collect()
+}
+// FIXME: should this be checking ACLs and stuff?
+pub fn assign(tx: &Token<Write>, issue: IssueId, user: UserId) {
+    tx.execute(
+        "INSERT INTO assignees (issue, user) VALUES (?, ?)",
+        (*issue, *user),
+    )
+    .expect("sql execution to succeed");
+}
+pub fn unassign(tx: &Token<Write>, issue: IssueId, user: UserId) {
+    tx.execute(
+        "DELETE FROM assignees WHERE issue = ? AND user = ?",
+        (*issue, *user),
+    )
+    .expect("sql execution to succeed");
+}
+
 pub fn referenced<M>(token: &Token<M>, by: PullRequestId) -> Vec<IssueId> {
     token
         .prepare("SELECT issue FROM closing_references WHERE pr = ?")

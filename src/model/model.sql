@@ -174,6 +174,12 @@ CREATE TABLE issue_comments (
     updated_at text not null default (datetime())
 ) STRICT;
 
+CREATE TABLE assignees (
+    issue integer not null references issues on delete cascade,
+    user integer not null references users on delete cascade,
+    unique (issue, user)
+) STRICT;
+
 -- `head` and `base` are somewhat similar, but all fields of `base`
 -- are actually required, which is not the case for `repo`:
 

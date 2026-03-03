@@ -12,6 +12,7 @@ use bytes::Bytes;
 use gix_actor::{Signature, SignatureRef};
 use gix_date::Time;
 use gix_object::bstr::ByteSlice;
+use itertools::Itertools as _;
 use serde::Deserialize;
 use smallvec::SmallVec;
 use tracing::{Span, instrument};
@@ -154,6 +155,7 @@ pub fn routes() -> Router<St> {
                 .route("/merges", post(create_branch_merge))
                 .route("/deployments", post(create_deployment))
                 .route("/deployments/{id}/statuses", post(create_deployment_status))
+                .route("/contributors", get(get_contributors))
                 .merge(access::routes())
                 .merge(issues::routes())
                 .nest("/git", git::routes())
@@ -1646,3 +1648,52 @@ async fn get_branch(
 #[derive(Deserialize)]
 struct UpdateBranchProtection {}
 async fn update_branch_protection() {}
+
+async fn get_contributors(
+    tx: Token<Read>,
+    Path((owner, name)): Path<(String, String)>,
+) -> Result<Json<Vec<github_types::users::PublicUser>>, GHError<'static>> {
+    let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
+        return Err(Error::NOT_FOUND.into_response(
+            "repos",
+            "repos",
+            "list-repository-contributors",
+        ));
+    };
+
+    let mut buffer = Vec::new();
+    let contributors = crate::model::git::get_objects(&tx, repo.network)
+        .into_iter()
+        .filter_map(|oid| {
+            buffer.clear();
+            let Some((gix_object::Kind::Commit, buf)) =
+                crate::model::git::get_in(&tx, repo.network, &oid, &mut buffer)
+            else {
+                return None;
+            };
+            let Ok(c) = gix_object::CommitRef::from_bytes(buf) else {
+                return None;
+            };
+            Some([c.author.email.to_string(), c.committer.email.to_string()])
+        })
+        .flatten()
+        .counts();
+
+    let mut counts = std::collections::HashMap::<String, usize>::with_capacity(
+        contributors.len(),
+    );
+    let mut users = Vec::<github_types::users::PublicUser>::with_capacity(
+        contributors.len(),
+    );
+    for (email, count) in contributors {
+        let Some(user) = crate::model::users::get_user_from_email(&tx, &email)
+        else {
+            continue;
+        };
+        *counts.entry(user.login.to_string()).or_default() += count;
+        users.push(user.into());
+    }
+    users.sort_by_key(|u| std::cmp::Reverse(counts[&u.login]));
+
+    Ok(Json(users))
+}
