@@ -318,6 +318,37 @@ async fn git_upload_pack(
         .into_response()
 }
 
+/// https://url.spec.whatwg.org/#component-percent-encode-set
+static COMPONENT: percent_encoding::AsciiSet = percent_encoding::CONTROLS
+    // query: U+0020 SPACE, U+0022 ("), U+0023 (#), U+003C (<), and U+003E (>).
+    .add(0x20)
+    .add(0x22)
+    .add(0x23)
+    .add(0x3c)
+    .add(0x3e)
+    // path: U+003F (?), U+005E (^), U+0060 (`), U+007B ({), and U+007D (}).
+    .add(0x3f)
+    .add(0x5e)
+    .add(0x60)
+    .add(0x7b)
+    .add(0x7d)
+    // userinfo: U+002F (/), U+003A (:), U+003B (;), U+003D (=), U+0040 (@), U+005B ([) to U+005D (]), inclusive, and U+007C (|).
+    .add(0x2f)
+    .add(0x3a)
+    .add(0x3b)
+    .add(0x3d)
+    .add(0x40)
+    .add(0x5b)
+    .add(0x5c)
+    .add(0x5d)
+    .add(0x7c)
+    // component: U+0024 ($) to U+0026 (&), inclusive, U+002B (+), and U+002C (,).
+    .add(0x24)
+    .add(0x25)
+    .add(0x26)
+    .add(0x2b)
+    .add(0x2c);
+
 #[instrument(skip(st, tx))]
 async fn git_receive_pack(
     auth: Authorization,
@@ -402,11 +433,16 @@ async fn git_receive_pack(
                     format_args!(
                         concat!(
                             "error: GH013: Repository rule violations found for {}.\n",
-                            "Review all repository rules\n",
+                            "Review all repository rules at https://github.com/{}/{}/rules?ref={}\n",
                             "\n",
                             "- Cannot create ref due to creations being restricted.\n",
                         ),
                         refname,
+                        owner,
+                        name,
+                        percent_encoding::utf8_percent_encode(
+                            refname, &COMPONENT
+                        ),
                     ),
                 );
             }
@@ -422,11 +458,16 @@ async fn git_receive_pack(
                     format_args!(
                         concat!(
                             "error: GH013: Repository rule violations found for {}.\n",
-                            "Review all repository rules\n",
+                            "Review all repository rules at https://github.com/{}/{}/rules?ref={}\n",
                             "\n",
                             "- Cannot update this protected ref.\n",
                         ),
                         refname,
+                        owner,
+                        name,
+                        percent_encoding::utf8_percent_encode(
+                            refname, &COMPONENT
+                        ),
                     ),
                 );
             } else {
