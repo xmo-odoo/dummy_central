@@ -856,6 +856,14 @@ async fn get_commit(
         ));
     };
 
+    let not_found = || {
+        let msg = format!("No commit found for SHA: {commit_ref}");
+        Error::Unprocessable(msg.into(), &[]).into_response(
+            "commits",
+            "commits",
+            "get-a-commit",
+        )
+    };
     let commit_ref = commit_ref.as_str();
     let oid =
         if let Ok(oid) = gix_hash::ObjectId::from_hex(commit_ref.as_bytes()) {
@@ -869,37 +877,17 @@ async fn get_commit(
                 //       them for now
                 format!("refs/{commit_ref}").into()
             };
-            if let Some(oid) =
-                crate::model::git::refs::resolve(&tx, repo.id, &commit_ref)
-            {
-                oid
-            } else {
-                return Err(Error::NOT_FOUND.into_response(
-                    "commits",
-                    "commits",
-                    "get-a-commit",
-                ));
-            }
+            crate::model::git::refs::resolve(&tx, repo.id, &commit_ref)
+                .ok_or_else(not_found)?
         };
 
     let mut buf = Vec::new();
-    let Some((kind, data)) =
+    let (kind, data) =
         crate::model::git::get_in(&tx, repo.network, &oid, &mut buf)
-    else {
-        return Err(Error::NOT_FOUND.into_response(
-            "commits",
-            "commits",
-            "get-a-commit",
-        ));
-    };
+            .ok_or_else(not_found)?;
 
     if kind != gix_object::Kind::Commit {
-        let msg = format!("No commit found for SHA: {commit_ref}");
-        return Err(Error::Unprocessable(msg.into(), &[]).into_response(
-            "commits",
-            "commits",
-            "get-a-commit",
-        ));
+        return Err(not_found());
     }
     let commit = gix_object::CommitRef::from_bytes(data).unwrap();
 
