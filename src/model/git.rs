@@ -432,12 +432,12 @@ pub fn merge(
 
     let updates = {
         // FIXME: should be recursive resolutions as those are commits!
-        let mut _base_buf = Vec::new();
-        let base = resolve_tree_in(tx, network, &merge_base, &mut _base_buf)?;
-        let mut _left_buf = Vec::new();
-        let left_tree = resolve_tree_in(tx, network, left, &mut _left_buf)?;
-        let mut _right_buf = Vec::new();
-        let right_tree = resolve_tree_in(tx, network, right, &mut _right_buf)?;
+        let mut base_buf = Vec::new();
+        let base = resolve_tree_in(tx, network, &merge_base, &mut base_buf)?;
+        let mut left_buf = Vec::new();
+        let left_tree = resolve_tree_in(tx, network, left, &mut left_buf)?;
+        let mut right_buf = Vec::new();
+        let right_tree = resolve_tree_in(tx, network, right, &mut right_buf)?;
 
         let mut changes1 = Recorder::default();
         gix_diff::tree(

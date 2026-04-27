@@ -418,7 +418,7 @@ async fn create_pull_request(
     let base = crate::model::git::refs::resolve(&tx, repo.id, &base_ref);
     let base_error = Error::details("PullRequest", "base", "invalid", "");
 
-    let _head_repo;
+    let head_repo;
     // If `head` is of the form {owner}:{branch} it's a cross-repo PR, in
     // that case we need to find the head's repository
     let (head_repo, head_branch) =
@@ -429,8 +429,8 @@ async fn create_pull_request(
                 })
                 .map(|repo_id| crate::model::repos::by_id(&tx, repo_id));
             if let Some(fork) = repo_p {
-                _head_repo = fork;
-                (&_head_repo, branch)
+                head_repo = fork;
+                (&head_repo, branch)
             } else {
                 return Err(Error::unprocessable(
                     "Validation Failed",
@@ -1877,13 +1877,18 @@ async fn create_issue_comment_reaction(
 
     if prs::add_reaction(&tx, comment.id, user.id, &content) {
         tx.commit();
-        Ok(Json(IssueCommentReaction { user: user.into(), content }))
+        Ok(Json(IssueCommentReaction {
+            user: user.into(),
+            content,
+        }))
     } else {
-        Err(Error::unprocessable("Validation Failed", &[]).into_response(
-            "reactions",
-            "reactions",
-            "create-reaction-for-an-issue-comment",
-        ))
+        Err(
+            Error::unprocessable("Validation Failed", &[]).into_response(
+                "reactions",
+                "reactions",
+                "create-reaction-for-an-issue-comment",
+            ),
+        )
     }
 }
 
@@ -1908,15 +1913,19 @@ async fn get_issue_comment_reactions(
         ));
     };
 
-    Ok(Json(prs::reactions(&tx, comment.id).into_iter().map(|r| {
-        let user = crate::model::users::get_by_id(&tx, r.user).into();
-        IssueCommentReaction {
-            user,
-            content: r.reaction,
-        }
-    }).collect()))
+    Ok(Json(
+        prs::reactions(&tx, comment.id)
+            .into_iter()
+            .map(|r| {
+                let user = crate::model::users::get_by_id(&tx, r.user).into();
+                IssueCommentReaction {
+                    user,
+                    content: r.reaction,
+                }
+            })
+            .collect(),
+    ))
 }
-
 
 #[derive(Deserialize)]
 struct Assignees {

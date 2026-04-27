@@ -1,4 +1,10 @@
-#![allow(dead_code, clippy::redundant_pattern_matching)]
+#![allow(
+    dead_code,
+    clippy::redundant_pattern_matching,
+    clippy::must_use_candidate,
+    clippy::missing_panics_doc,
+    clippy::match_same_arms
+)]
 
 use std::collections::HashMap;
 use std::fs;

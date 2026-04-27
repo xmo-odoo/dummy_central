@@ -119,7 +119,7 @@ async fn add_collaborator(
                 "add-a-repository-collaborator",
             ));
     }
-    if !crate::model::repos::add_collaborator(&tx, repo.id, new_collaborator) {
+    if !crate::model::repos::add_collaborator(&tx, repo.id, &new_collaborator) {
         return Err(Error::NOT_FOUND.into_response(
             "collaborators",
             "collaborators",

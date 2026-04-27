@@ -372,9 +372,7 @@ pub fn create_hook(
         ),
         |row| row.try_into(),
     )
-    .inspect_err(|e| if e.sqlite_error_code() != Some(ConstraintViolation) {
-        panic!("{e}");
-    })
+    .inspect_err(|e| assert!(e.sqlite_error_code() == Some(ConstraintViolation), "{e}"))
     .ok()
 }
 
@@ -425,11 +423,7 @@ pub fn hook_set_last_response(tx: &Token<Write>, hook: i64, code: u16) {
         (
             code,
             Option::<&str>::None,
-            if code % 100 != 2 {
-                Some(format!("Invalid HTTP Response: {code}"))
-            } else {
-                None
-            },
+            (code % 100 != 2).then(|| format!("Invalid HTTP Response: {code}")),
             hook,
         ),
     )
@@ -534,7 +528,7 @@ pub fn get_collaborators<M>(
 pub fn add_collaborator(
     tx: &Token<Write>,
     repo: RepositoryId,
-    login: String,
+    login: &str,
 ) -> bool {
     1 == tx
         .execute(

@@ -315,18 +315,18 @@ async fn create_fork(
             })?
     };
 
-    let _org;
-    let new_owner = if let Some(org) = req.organization {
-        if let Some(u) = crate::model::users::get_user(&tx, &org) {
+    let org;
+    let new_owner = if let Some(orgname) = req.organization {
+        if let Some(u) = crate::model::users::get_user(&tx, &orgname) {
             if matches!(u.r#type, crate::model::users::Type::Organization) {
-                _org = u;
-                &_org
+                org = u;
+                &org
             } else {
                 const DETAILS: &[GithubErrorDetails<'_>] =
                     &[Error::details("Fork", "organization", "invalid", "")];
                 return Err(Error::Unprocessable(
                     format!(
-                        "'{org}' is the login for a user account. \
+                        "'{orgname}' is the login for a user account. \
                         You must pass the login for an organization account."
                     )
                     .into(),

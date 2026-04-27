@@ -607,7 +607,7 @@ async fn get_invitations() -> impl IntoResponse {
 /// - 404 (not found) ???
 /// - 409 (conflict) ???
 #[instrument]
-async fn accept_invitation(Path(_invitation_id): Path<usize>) -> StatusCode {
+async fn accept_invitation(Path(_): Path<usize>) -> StatusCode {
     StatusCode::NO_CONTENT
 }
 
