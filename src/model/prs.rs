@@ -33,7 +33,7 @@ pub struct PullRequest {
 
     /// target branch
     pub base: String,
-    /// <owner>:<branch>, remains accessible even if the other fields are emptied
+    /// `<owner>:<branch>`, remains accessible even if the other fields are emptied
     pub label: String,
     // source branch information
     /// Source repository, contains owner info
@@ -395,7 +395,8 @@ pub fn add_reaction(
 INSERT INTO issue_comments_reactions (comment, user, reaction) VALUES (?, ?, ?)
 ",
         (*comment, *user, reaction),
-    ).is_ok()
+    )
+    .is_ok()
 }
 
 pub struct Reaction {

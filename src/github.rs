@@ -592,16 +592,6 @@ async fn get_current_user_emails(
 }
 
 /// Returns the list of invitations for current user.
-///
-/// - id
-/// - node_id
-/// - permissions (write/push/...)
-/// - created_at
-/// - url
-/// - html_url
-/// - inviter
-/// - invitee
-/// - repository
 #[instrument]
 async fn get_invitations() -> impl IntoResponse {
     (StatusCode::OK, b"[]")
@@ -840,9 +830,10 @@ of the decoded id is
 
     <typlen>:<typ><typid>
 
-The "typ" identifies the object kind (e.g. Commit, User, PullRequest, ...), typid is
-type-specific but apparently tends to start with the database id of the repo,
-then might contain an object-specific id e.g. the sha for a commit.
+The "typ" identifies the object kind (e.g. `Commit`, `User`, `PullRequest`,
+...), typid is type-specific but apparently tends to start with the database
+id of the repo, then might contain an object-specific id e.g. the sha for a
+commit.
 
 Note: looking at a super old PR it's apparently just the database ID of the PR,
 so I guess github does have a single db? Or is it that they *had* a single db?

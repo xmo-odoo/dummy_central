@@ -16,7 +16,7 @@ use super::{Token, Write, repos::Network};
 const HEADER_SIZE: usize = 28;
 
 /// Extacts the `sha` column from a [`rusqlite::Row`] and converts it to a
-/// [`gix_object::ObjectId`]
+/// [`gix_hash::ObjectId`]
 fn sha_to_oid(row: &rusqlite::Row<'_>) -> rusqlite::Result<ObjectId> {
     <[u8; 20]>::try_from(row.get_ref("sha")?.as_blob()?)
         .map(ObjectId::from)
@@ -547,8 +547,7 @@ pub fn merge(
     Ok(cid)
 }
 
-/// Returns a tree buffer for the oid, or fails with the relevant merge error
-/// (NotFound or InvalidObjectType)
+/// Returns a tree buffer for the oid, or fails with the relevant [`MergeError`]
 fn get_tree_in<'buf, M>(
     tx: &Token<M>,
     network: Network,

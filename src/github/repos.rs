@@ -813,7 +813,7 @@ async fn list_commits(
 ///
 /// - `commits/*ref` is a commit
 /// - `commits/*ref/pulls` is the PRs associated with the commits
-/// - `commits/*ref/status is the combined statuses for the ref
+/// - `commits/*ref/status` is the combined statuses for the ref
 /// - `commits/*ref/statuses` is the individual statuses for the ref
 ///
 /// This function serves as trampolines: by checking the `path`'s suffix it can

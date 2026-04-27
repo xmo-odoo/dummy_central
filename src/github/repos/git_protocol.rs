@@ -318,7 +318,7 @@ async fn git_upload_pack(
         .into_response()
 }
 
-/// https://url.spec.whatwg.org/#component-percent-encode-set
+/// <https://url.spec.whatwg.org/#component-percent-encode-set>
 static COMPONENT: percent_encoding::AsciiSet = percent_encoding::CONTROLS
     // query: U+0020 SPACE, U+0022 ("), U+0023 (#), U+003C (<), and U+003E (>).
     .add(0x20)

@@ -201,7 +201,7 @@ struct Permission {
     user: github_types::users::SimpleUser,
 }
 
-/// https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user
+/// <https://docs.github.com/en/rest/collaborators/collaborators#get-repository-permissions-for-a-user>
 #[instrument(skip(st, tx))]
 async fn get_collaborator_permission(
     State(st): State<St>,

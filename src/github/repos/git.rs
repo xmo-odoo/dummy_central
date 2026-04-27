@@ -839,8 +839,7 @@ async fn update_ref(
     }))
 }
 
-/// Fully identify a branch to try and find a PR
-/// (repo, branch_name)
+/// Fully identify a branch to try and find a PR `(repo, branch_name)`
 pub type BranchRef<'a> = (RepositoryId, &'a str);
 /// A ref has been updated, which may be the `head` of a PR in a repo
 /// (the same or) an other). This thus requires checking in all repos whether

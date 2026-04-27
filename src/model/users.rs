@@ -125,9 +125,9 @@ pub fn get_user_from_email<M>(
     .unwrap()
 }
 
-/// Gets a User by their Id. Because UserId should only be obtainable from a
+/// Gets a User by their Id. Because [`UserId`] should only be obtainable from a
 /// real record with verified FKs, this can not fail (well except for the bit
-/// where we can get a UserId *then* remove the account, but we don't talk
+/// where we can get a [`UserId`] *then* remove the account, but we don't talk
 /// about that).
 pub fn get_by_id<M>(tx: &Token<M>, id: UserId) -> User<'static> {
     tx.query_row(
