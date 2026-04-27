@@ -13,11 +13,12 @@ use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
 use base64::prelude::{BASE64_STANDARD, Engine as _};
-use gix_object::bstr::{BStr, BString};
-use hmac::{Hmac, Mac};
+use gix_object::bstr::{BStr, BString, ByteSlice as _};
+use hmac::{Hmac, KeyInit as _, Mac};
 use serde::{Deserialize, Serialize};
 use sha1::Sha1;
 use sha2::Sha256;
+use tap::Tap as _;
 use tokio::sync::mpsc::{
     UnboundedReceiver, UnboundedSender, unbounded_channel,
 };
@@ -736,24 +737,28 @@ async fn create_repository(
         });
         let mut time_buf = Default::default();
         let tree = crate::model::git::store(&tx, repo.network, t);
-        let sig = gix_actor::SignatureRef {
-            name: u.login.as_ref().into(),
-            // FIXME: email for default signature?
-            email: u
-                .email
-                .as_ref()
-                .map_or("user@example.org", Cow::as_ref)
-                .into(),
-            time: gix_date::Time::now_utc().to_str(&mut time_buf),
-        };
+        let sig = BString::default().tap_mut(|w| {
+            gix_actor::SignatureRef {
+                name: u.login.as_ref().into(),
+                // FIXME: email for default signature?
+                email: u
+                    .email
+                    .as_ref()
+                    .map_or("user@example.org", Cow::as_ref)
+                    .into(),
+                time: gix_date::Time::now_utc().to_str(&mut time_buf),
+            }
+            .write_to(&mut **w)
+            .expect("bstring writes to always work")
+        });
         let c = crate::model::git::store(
             &tx,
             repo.network,
             gix_object::CommitRef {
                 tree: BString::from(tree.to_string()).as_ref(),
                 parents: Default::default(),
-                author: sig,
-                committer: sig,
+                author: sig.as_bstr(),
+                committer: sig.as_bstr(),
                 encoding: None,
                 message: BStr::new(b"Initial commit"),
                 extra_headers: Vec::new(),

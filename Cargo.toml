@@ -32,7 +32,7 @@ gix-actor = "*"
 gix-date = "*"
 gix-diff = "*"
 gix-features = "*"
-gix-hash = "*"
+gix-hash = { version = "*", features = ["sha1"]}
 gix-object = "*"
 gix-pack = "*"
 gix-traverse = "*"
@@ -49,10 +49,10 @@ r2d2 = "*"
 r2d2_sqlite = "*"
 regex = "*"
 reqwest = { version = "*", features = ["json", "multipart"] }
-rusqlite = { version = "*", features = ["bundled"] }
+rusqlite = { version = "*", features = ["bundled", "fallible_uint"] }
 serde = { version = "*", features = ["derive"] }
 serde_json = "*"
-sha-1 = "*"
+sha1 = "*"
 sha2 = "*"
 smallvec = "*"
 tempfile = "*"
@@ -70,6 +70,7 @@ init-tracing-opentelemetry = { version = "*", optional = true, features = ["otlp
 tracing-opentelemetry = {version = "*", optional = true }
 opentelemetry-http = { version = "*", optional = true }
 globset = "*"
+tap = "1.0.1"
 
 [features]
 otlp = [
@@ -80,4 +81,3 @@ otlp = [
     "dep:opentelemetry-http",
     "async-graphql/opentelemetry",
 ]
-

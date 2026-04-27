@@ -251,7 +251,10 @@ pub fn load<M>(
         (*network, oid.as_bytes()),
         |row| {
             let data = row.get_ref("data")?.as_blob()?;
-            Ok(ObjectRef::from_loose(data).unwrap().to_owned())
+            Ok(ObjectRef::from_loose(data, gix_hash::Kind::Sha1)
+                .unwrap()
+                .to_owned()
+                .unwrap())
         },
     )
     .optional()
@@ -411,8 +414,13 @@ impl<M> gix_object::Find for Finder<'_, M> {
         id: &gix_hash::oid,
         buffer: &'a mut Vec<u8>,
     ) -> Result<Option<gix_object::Data<'a>>, gix_object::find::Error> {
-        Ok(get_in(self.0, self.1, id, buffer)
-            .map(|(kind, data)| gix_object::Data { kind, data }))
+        Ok(get_in(self.0, self.1, id, buffer).map(|(kind, data)| {
+            gix_object::Data {
+                kind,
+                hash_kind: gix_hash::Kind::Sha1,
+                data,
+            }
+        }))
     }
 }
 
@@ -558,7 +566,7 @@ fn get_tree_in<'buf, M>(
         .ok_or(MergeError::NotFound)
         .and_then(|(kind, buf)| {
             if kind == Kind::Tree {
-                Ok(TreeRefIter::from_bytes(buf))
+                Ok(TreeRefIter::from_bytes(buf, gix_hash::Kind::Sha1))
             } else {
                 Err(MergeError::InvalidObjectType(kind))
             }
@@ -587,7 +595,10 @@ fn resolve_tree_in<'buf, M>(
                 // object slice directly from `buf`
                 let left = data.len();
                 let consumed = buf.len() - left;
-                return Ok(TreeRefIter::from_bytes(&buf[consumed..]));
+                return Ok(TreeRefIter::from_bytes(
+                    &buf[consumed..],
+                    gix_hash::Kind::Sha1,
+                ));
             }
             (Kind::Blob, _) => return Err(MergeError::NoTree),
             (Kind::Commit, data) => CommitRef::from_bytes(data)

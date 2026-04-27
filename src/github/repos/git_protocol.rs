@@ -281,7 +281,7 @@ async fn git_upload_pack(
                 .unwrap();
                 Ok(vec![PackEntry::from_data(
                     &Count::from_data(oid, None),
-                    &Data::new(kind, data),
+                    &Data::new(data, kind, gix_hash::Kind::Sha1),
                 )?])
             },
         ),
@@ -658,7 +658,8 @@ fn load_pack_data(
         let oid = crate::model::git::store(
             tx,
             repo.network,
-            ObjectRef::from_bytes(kind, &entry_buf).unwrap(),
+            ObjectRef::from_bytes(&entry_buf, kind, gix_hash::Kind::Sha1)
+                .unwrap(),
         );
         entries_offset_cache.insert(entry.pack_offset, oid);
     }

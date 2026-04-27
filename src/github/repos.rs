@@ -98,8 +98,8 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
                 },
                 message: String::from_utf8_lossy(commit.message.trim())
                     .to_string(),
-                author: Some(commit.author.into()),
-                committer: Some(commit.committer.into()),
+                author: Some(commit.author().unwrap().into()),
+                committer: Some(commit.committer().unwrap().into()),
                 comments_count: 0,
                 url: format!(
                     "{}/repos/{}/{}/git/commits/{}",
@@ -123,8 +123,8 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
             ),
             comments_url: String::new(),
             html_url: String::new(),
-            author: to_user(commit.author),
-            committer: to_user(commit.committer),
+            author: to_user(commit.author().unwrap()),
+            committer: to_user(commit.committer().unwrap()),
             files: vec![],
         }
     }
@@ -1662,7 +1662,10 @@ async fn get_contributors(
             let Ok(c) = gix_object::CommitRef::from_bytes(buf) else {
                 return None;
             };
-            Some([c.author.email.to_string(), c.committer.email.to_string()])
+            Some([
+                c.author().ok()?.email.to_string(),
+                c.committer().ok()?.email.to_string(),
+            ])
         })
         .flatten()
         .counts();

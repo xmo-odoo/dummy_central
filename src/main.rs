@@ -87,7 +87,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .layer(CatchPanicLayer::new())
         // Set a timeout
-        .layer(TimeoutLayer::new(Duration::from_secs(10)));
+        .layer(TimeoutLayer::with_status_code(http::StatusCode::REQUEST_TIMEOUT, Duration::from_secs(10)));
 
     #[cfg(feature = "otlp")]
     let (handler, _trace_guard) = {
