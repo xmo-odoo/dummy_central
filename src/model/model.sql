@@ -21,7 +21,7 @@ CREATE TABLE users (
     id integer primary key,
     login text not null unique,
     name text,
-    type text not null check (type in ('user', 'organization')),
+    type text not null check (type in ('user', 'organization', 'bot')),
     -- default default branch for repos
     default_branch text not null default 'main'
 ) STRICT;
@@ -282,4 +282,93 @@ CREATE TABLE repository_webhooks (
     last_response_message text,
 
     UNIQUE (repository, url)
+) STRICT;
+
+CREATE TABLE applications (
+    id integer primary key,
+    -- not bots
+    owner integer not null references users (id),
+    public integer not null default 0 check (public in (0, 1)),
+
+    name text not null,
+    slug text not null,
+    description text,
+    -- homepage url
+    url text not null,
+    -- bot user used for IAT interactions
+    user integer not null references users (id),
+
+    client_id text not null,
+
+    -- whether to redirect to the setup_url (default, if present)
+    -- or callback_urls after an application is installed
+    request_oauth_on_install integer not null default 0 check (request_oauth_on_install in (0, 1)),
+    -- redo setup redirect (see above) on update
+    setup_on_update integer not null default 0 check (setup_on_update in (0, 1)),
+    -- can't be set if we require oauth authorization
+    setup_url text check (setup_url is null or not request_oauth_on_install),
+    -- must be set if we require oauth authorization
+    callback_urls text check (callback_urls is not null or not request_oauth_on_install),
+    -- device_flow integer not null default 0 check (device_flow in (0, 1)),
+
+    webhook_active integer not null default 1 check (webhook_active in (0, 1)),
+    webhook_url text check (webhook_active = 0 or webhook_url is not null),
+    webhook_secret text,
+    events text
+) STRICT;
+
+CREATE TABLE application_secrets (
+    application integer not null references applications (id),
+    value blob not null
+) STRICT;
+
+CREATE TABLE application_keys (
+    application integer not null references applications (id),
+    public blob not null
+) STRICT;
+
+CREATE TABLE permissions (
+    application integer not null references applications (id),
+    scope text not null,
+    access text not null check (access in ('read', 'write')),
+    primary key (application, scope)
+) STRICT;
+
+CREATE TABLE installations (
+    id integer primary key,
+    application integer not null references applications (id),
+    user integer not null references users (id),
+    -- if the application requires no perms then this is not configured,
+    -- if perms are added then update will be requested and will have
+    -- to configure either all repos or select at least one
+    all_repos integer not null check (all_repos in (0, 1)),
+    unique (application, user)
+) STRICT;
+
+-- note: repositories.owner should be the same value as installations.user...
+CREATE TABLE installation_repos (
+    installation integer not null references installations (id),
+    repository integer not null references repositories (id),
+    primary key (installation, repository)
+) STRICT;
+
+CREATE TABLE installation_tokens (
+    installation integer not null references installations (id),
+    expires_at integer not null default (unixepoch('now', '+1 hour')),
+    -- TODO: repos, permissions: an IAT can have a tighter scope
+    --       than the installation it's created from (maybe just
+    --       copy and restrict so the checking code is uniform?)
+    value blob not null
+) STRICT;
+
+-- TODO: scoped tokens
+CREATE TABLE authorizations (
+    application integer not null references installations (id),
+    -- should only allow User
+    user integer not null references users (id),
+    access_token blob not null,
+    access_token_expires_at integer not null default (unixepoch('now', '+8 hours')),
+    refresh_token blob not null,
+    -- ~6 months
+    refresh_token_expires_at integer not null default (unixepoch('now', '+184 days'))
 ) STRICT;
