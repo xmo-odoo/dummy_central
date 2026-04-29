@@ -27,6 +27,9 @@ pub async fn load(
     for (login, name, typ, tokens, email) in users {
         let user_id = insert_user.insert((login, name, typ))?;
         for token in tokens {
+            let token = token
+                .strip_prefix("ghp_")
+                .expect("Only classic personal access token (`ghp` prefix) are supported");
             insert_token.insert((user_id, token))?;
         }
         if !email.is_empty() {
@@ -209,26 +212,6 @@ pub fn get_by_i64<M>(tx: &Token<M>, id: i64) -> Option<User<'static>> {
         where id = ?
         ",
         [id],
-        |row| row.try_into(),
-    )
-    .optional()
-    .unwrap()
-}
-
-/// Finds the "current user" by auth token
-pub fn find_current_user<M>(
-    tx: &Token<M>,
-    token: &str,
-) -> Option<User<'static>> {
-    tx.query_row(
-        "SELECT users.id, login, type, name, email, default_branch
-        FROM users
-        JOIN tokens ON (users.id = tokens.user)
-        LEFT JOIN emails
-           ON (emails.user = users.id AND \"primary\" AND visibility = 'public')
-        WHERE tokens.token = ?
-        ",
-        [token],
         |row| row.try_into(),
     )
     .optional()

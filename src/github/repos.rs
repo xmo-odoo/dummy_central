@@ -23,7 +23,7 @@ use github_types::webhooks::{Webhook, WebhookEvent};
 use super::{GHError, HookConfig};
 use crate::github::{
     Authorization, Config, Error, GithubError, GithubErrorDetails, SimpleUser,
-    St, auth_to_user,
+    St,
 };
 use crate::model::prs::ReferenceFinder;
 use crate::model::{Read, Token, Write};
@@ -233,12 +233,7 @@ async fn delete_repository(
     tx: Token<Write>,
     Path((owner, name)): Path<(String, String)>,
 ) -> Result<StatusCode, GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated(
-            "You must be logged in to do that.",
-        )
-        .into_response("repos", "repos", "delete-a-repository"));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
@@ -278,16 +273,7 @@ async fn create_fork(
     Path((owner, name)): Path<(String, String)>,
     req: Bytes,
 ) -> Result<(StatusCode, Json<RepositoryResponse>), GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated(
-            "You must be logged in to do that.",
-        )
-        .into_response(
-            "guides",
-            "getting-started-with-the-rest-api",
-            "authentication",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
@@ -1018,14 +1004,7 @@ async fn create_or_update_contents(
     Path((owner, name, path)): Path<(String, String, String)>,
     Json(request): Json<CreateContentsRequest>,
 ) -> Result<(StatusCode, Json<FileCommit>), GHError<'static>> {
-    // TODO: is this the right error response?
-    let Some(user) = auth_to_user(&tx, auth) else {
-        return Err(Error::NOT_FOUND.into_response(
-            "repos",
-            "contents",
-            "create-or-update-file-contents",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "repos",
@@ -1275,7 +1254,7 @@ async fn create_status(
         description,
     }): Json<CreateStatusGarbage>,
 ) -> Result<Json<CreateStatusResponse>, GHError<'static>> {
-    let creator = crate::github::auth_to_user(&tx, auth).unwrap();
+    let creator = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "commits",
@@ -1359,11 +1338,7 @@ async fn create_branch_merge(
     Path((owner, name)): Path<(String, String)>,
     Json(req): Json<CreateBranchMerge>,
 ) -> Result<(StatusCode, Json<CommitsResponse>), Response> {
-    let Some(user) = auth_to_user(&tx, auth) else {
-        return Err(Error::Forbidden("")
-            .into_response("branches", "branches", "merge-a-branch")
-            .into_response());
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND
             .into_response("branches", "branches", "merge-a-branch")

@@ -12,7 +12,7 @@ use crate::model::{
     Read, Token, Write,
     prs::{IssueId, PullRequest, PullRequestId},
     repos::RepositoryId,
-    users::{User, find_current_user},
+    users::User,
 };
 
 pub fn routes() -> Router<St> {
@@ -126,10 +126,9 @@ impl MutationRoot {
         let st = ctx.data_unchecked::<St>();
         let tx = Token::<Write>::get().await.unwrap();
 
-        let Authorization(_, auth) = ctx.data_unchecked::<Authorization>();
-        let Some(user) = find_current_user(&tx, auth) else {
-            return Err(Error::new("Unknown user"));
-        };
+        // TODO: maybe should be Option so it can `Error::new("Unknown user")` on auth failure?
+        let auth = ctx.data_unchecked::<Authorization>();
+        let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
 
         let pr = get_pr(&tx, &user, &pull_request_id)?;
         if crate::model::prs::set_draft(&tx, pr.id, false) {
@@ -167,10 +166,9 @@ impl MutationRoot {
         let st = ctx.data_unchecked::<St>();
         let tx = Token::<Write>::get().await.unwrap();
 
-        let Authorization(_, auth) = ctx.data_unchecked::<Authorization>();
-        let Some(user) = find_current_user(&tx, auth) else {
-            return Err(Error::new("Unknown user"));
-        };
+        // TODO: maybe should be Option so it can `Error::new("Unknown user")` on auth failure?
+        let auth = ctx.data_unchecked::<Authorization>();
+        let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
 
         let pr = get_pr(&tx, &user, &pull_request_id)?;
         if crate::model::prs::set_draft(&tx, pr.id, true) {

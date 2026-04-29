@@ -5,14 +5,11 @@ use std::borrow::Cow;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use axum::extract::{FromRequestParts, OptionalFromRequestParts, Path, State};
+use axum::extract::{Path, State};
 use axum::http::StatusCode;
-use axum::http::header::AUTHORIZATION;
-use axum::http::request::Parts;
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, patch, post};
 use axum::{Json, Router};
-use base64::prelude::{BASE64_STANDARD, Engine as _};
 use gix_object::bstr::{BStr, BString, ByteSlice as _};
 use hmac::{Hmac, KeyInit as _, Mac};
 use serde::{Deserialize, Serialize};
@@ -36,8 +33,7 @@ use github_types::webhooks::Webhook;
 
 use crate::model::repos::Repository;
 use crate::model::users::{
-    Email as ModelEmail, Type, User, Visibility, find_current_user,
-    list_user_emails,
+    ActorId, Email as ModelEmail, Type, User, Visibility, list_user_emails,
 };
 use crate::model::{Read, Token, Write};
 
@@ -450,82 +446,8 @@ impl Repository {
     }
 }
 type St = Arc<Config>;
-fn auth_to_user<M>(
-    tx: &Token<M>,
-    auth: Authorization,
-) -> Option<User<'static>> {
-    find_current_user(tx, &auth.1)
-}
 
-#[derive(Debug)]
-struct Authorization(Option<String>, String);
-impl<S> OptionalFromRequestParts<S> for Authorization
-where
-    S: Send + Sync,
-{
-    type Rejection = GHError<'static>;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        _state: &S,
-    ) -> Result<Option<Self>, Self::Rejection> {
-        Ok(parts
-            .headers
-            .get(AUTHORIZATION)
-            .and_then(|h| {
-                let h = h.to_str().ok()?;
-                // auth-scheme SP data
-                if let Some(h) = h.strip_prefix("token ") {
-                    Some((None, h.to_string()))
-                } else if let Some(h) = h
-                    .strip_prefix("basic ")
-                    .or_else(|| h.strip_prefix("Basic "))
-                {
-                    let v = String::from_utf8(BASE64_STANDARD.decode(h).ok()?)
-                        .ok()
-                        .filter(|v| !v.is_empty())?;
-                    v.split_once(':')
-                        .map_or_else(
-                            || (None, v.to_string()),
-                            |(user, key)| {
-                                if key.is_empty() {
-                                    // apparently `foo@bar.com` translates to
-                                    // `basic foo:` rather than `basic foo`
-                                    (None, user.to_string())
-                                } else {
-                                    (Some(user.to_string()), key.to_string())
-                                }
-                            },
-                        )
-                        .into()
-                } else {
-                    None
-                }
-            })
-            .map(|(a, b)| Authorization(a, b)))
-    }
-}
-impl<S> FromRequestParts<S> for Authorization
-where
-    S: Send + Sync,
-{
-    type Rejection = GHError<'static>;
-
-    async fn from_request_parts(
-        parts: &mut Parts,
-        state: &S,
-    ) -> Result<Self, Self::Rejection> {
-        <Authorization as OptionalFromRequestParts<S>>::from_request_parts(
-            parts, state,
-        )
-        .await
-        .and_then(|r| match r {
-            Some(r) => Ok(r),
-            None => Err(Error::Unauthenticated("Requires authentication")
-                .into_response("", "", "")),
-        })
-    }
-}
+type Authorization = auth::ActorAuth;
 
 #[rustfmt::skip]
 pub fn routes(st: Config) -> Router {
@@ -548,49 +470,28 @@ pub fn routes(st: Config) -> Router {
 #[allow(clippy::type_complexity)]
 #[instrument(skip(tx))]
 async fn get_current_user(
-    auth: Authorization,
+    auth: auth::UserAuth,
     tx: Token<Read>,
-) -> Result<
-    ([(&'static str, &'static str); 1], Json<PublicUser>),
-    GHError<'static>,
-> {
-    auth_to_user(&tx, auth)
-        .ok_or_else(|| {
-            Error::Unauthenticated("Requires authentication").into_response(
-                "users",
-                "users",
-                "get-the-authenticated-user",
-            )
-        })
-        .map(|u| {
-            (
-                [("X-OAuth-Scopes", "user:email")],
-                Json(PublicUser::from(u)),
-            )
-        })
+) -> ([(&'static str, &'static str); 1], Json<PublicUser>) {
+    let u = crate::model::users::get_by_id(&tx, auth.user);
+    (
+        [("X-OAuth-Scopes", "user:email")],
+        Json(PublicUser::from(u)),
+    )
 }
 
 #[instrument(skip(tx))]
 async fn get_current_user_emails(
-    auth: Authorization,
+    auth: auth::UserAuth,
     tx: Token<Read>,
-) -> Result<Json<Vec<Email>>, GHError<'static>> {
-    auth_to_user(&tx, auth)
-        .ok_or_else(|| {
-            Error::Unauthenticated("Requires authentication").into_response(
-                "users",
-                "users",
-                "get-the-authenticated-user",
-            )
-        })
-        .map(|u| {
-            Json(
-                list_user_emails(&tx, u.id)
-                    .into_iter()
-                    .map(Email::from)
-                    .collect(),
-            )
-        })
+) -> Json<Vec<Email>> {
+    let u = crate::model::users::get_by_id(&tx, auth.user);
+    Json(
+        list_user_emails(&tx, u.id)
+            .into_iter()
+            .map(Email::from)
+            .collect(),
+    )
 }
 
 /// Returns the list of invitations for current user.
@@ -675,21 +576,30 @@ const REPO_CREATION_FAILED: Error = Error::unprocessable(
 );
 #[instrument(skip(st, tx), err(Debug, level=Level::INFO))]
 async fn create_repository(
-    auth: Authorization,
+    auth: auth::ActorAuth,
     State(st): State<St>,
     tx: Token<Write>,
-    owner: Option<Path<String>>,
+    org: Option<Path<String>>,
     Json(request): Json<CreateRepositoryRequest>,
 ) -> Result<Response, GHError<'static>> {
-    let owner = owner.as_deref().map_or("", |o| &**o);
-    let endpoint = if owner.is_empty() {
-        "create-a-repository-for-the-authenticated-user"
-    } else {
-        "create-an-organization-repository"
-    };
-    let Some(u) = auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("Requires authentication")
-            .into_response("repos", "repos", endpoint));
+    let creator = crate::model::users::get_actor_by_id(&tx, auth.actor);
+    let (owner, endpoint) = match (auth.actor, org) {
+        (_, Some(orgname)) => (
+            crate::model::users::get_user(&tx, &orgname),
+            "create-an-organization-repository",
+        ),
+        (ActorId::User(_), None) => (
+            Some(creator.clone()),
+            "create-a-repository-for-the-authenticated-user",
+        ),
+        _ => {
+            // FIXME: check if that's the right response
+            return Err(Error::Forbidden("???").into_response(
+                "repos",
+                "repos",
+                "create-a-repository-for-the-authenticated-user",
+            ));
+        }
     };
 
     // Repository name can only contain ASCII letters,
@@ -711,17 +621,13 @@ async fn create_repository(
         return Err(NAME_TOO_LONG.into_response("repos", "repos", endpoint));
     }
 
-    let Some(owner) = owner
-        .is_empty()
-        .then(|| u.clone())
-        .or_else(|| crate::model::users::get_user(&tx, owner))
-    else {
+    let Some(owner) = owner else {
         return Err(Error::NOT_FOUND.into_response("repos", "repos", endpoint));
     };
 
-    let Some(repo) =
-        crate::model::repos::create_repository(&tx, u.id, owner.id, name, None)
-    else {
+    let Some(repo) = crate::model::repos::create_repository(
+        &tx, creator.id, owner.id, name, None,
+    ) else {
         return Err(
             REPO_CREATION_FAILED.into_response("repos", "repos", endpoint)
         );
@@ -740,9 +646,9 @@ async fn create_repository(
         let tree = crate::model::git::store(&tx, repo.network, t);
         let sig = BString::default().tap_mut(|w| {
             gix_actor::SignatureRef {
-                name: u.login.as_ref().into(),
+                name: creator.login.as_ref().into(),
                 // FIXME: email for default signature?
-                email: u
+                email: creator
                     .email
                     .as_ref()
                     .map_or("user@example.org", Cow::as_ref)

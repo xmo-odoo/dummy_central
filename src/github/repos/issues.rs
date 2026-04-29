@@ -403,11 +403,7 @@ async fn create_pull_request(
     Path((owner, name)): Path<(String, String)>,
     Json(req): Json<PullRequestCreate>,
 ) -> Result<(http::StatusCode, Json<PullRequestResponse>), Response> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::NOT_FOUND
-            .into_response("pulls", "pulls", "create-a-pull-request")
-            .into_response());
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND
             .into_response("pulls", "pulls", "create-a-pull-request")
@@ -552,7 +548,7 @@ async fn update_pull_request(
     Path((owner, name, number)): Path<(String, String, usize)>,
     Json(update): Json<PullRequestUpdate>,
 ) -> Result<Json<PullRequestResponse>, Response> {
-    let user = crate::github::auth_to_user(&tx, auth).unwrap();
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(pr) = find_pr(&tx, &owner, &name, number) else {
         return Err(Error::NOT_FOUND
             .into_response("pulls", "pulls", "update-a-pull-request")
@@ -741,13 +737,7 @@ async fn create_review(
     Path((owner, name, pr)): Path<(String, String, usize)>,
     Json(req): Json<CreateReviewRequest>,
 ) -> Result<(http::StatusCode, Json<ReviewResponse>), GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::NOT_FOUND.into_response(
-            "pulls",
-            "reviews",
-            "create-a-review-for-a-pull-request",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "pulls",
@@ -1187,13 +1177,7 @@ async fn create_issue(
     Path((owner, name)): Path<(String, String)>,
     Json(req): Json<IssueCreate>,
 ) -> Result<(http::StatusCode, Json<IssueResponse>), GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "issues",
-            "comments",
-            "create-an-issue",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
 
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
@@ -1489,13 +1473,7 @@ async fn create_issue_comment(
     Path((owner, name, issue_number)): Path<(String, String, usize)>,
     Json(req): Json<CommentCreate>,
 ) -> Result<(http::StatusCode, Json<IssueCommentResponse>), GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "issues",
-            "issues",
-            "create-an-issue-response",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "issues",
@@ -1675,13 +1653,7 @@ async fn update_issue_comment(
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
     Json(IssueCommentUpdate { body }): Json<IssueCommentUpdate>,
 ) -> Result<Json<IssueCommentResponse>, GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "issues",
-            "comments",
-            "update-an-issue-comment",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "issues",
@@ -1758,13 +1730,7 @@ async fn delete_issue_comment(
     tx: Token<Write>,
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
 ) -> Result<http::StatusCode, GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "issues",
-            "comments",
-            "delete-an-issue-comment",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "issues",
@@ -1852,13 +1818,7 @@ async fn create_issue_comment_reaction(
     Path((owner, name, comment_id)): Path<(String, String, i64)>,
     Json(Reaction { content }): Json<Reaction>,
 ) -> Result<Json<IssueCommentReaction>, GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "reactions",
-            "reactions",
-            "create-reaction-for-an-issue-comment",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo_id) = id_by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "reactions",
@@ -1939,14 +1899,7 @@ async fn add_assignees(
     Path((owner, name, number)): Path<(String, String, usize)>,
     Json(Assignees { assignees }): Json<Assignees>,
 ) -> Result<(http::StatusCode, Json<IssueResponse>), GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        // TODO: ?
-        return Err(Error::Unauthenticated("").into_response(
-            "issues",
-            "assignees",
-            "add-assignees-to-an-issue",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(issue_id) = prs::find_issue_id(&tx, &owner, &name, number) else {
         // TODO: what do you get if you try to add an assignee to a
         //       repo / id which does not exist?
@@ -1980,20 +1933,12 @@ async fn add_assignees(
 
 #[instrument(skip(st, tx))]
 async fn remove_assignees(
-    auth: Authorization,
+    _: Authorization,
     State(st): State<St>,
     tx: Token<Write>,
     Path((owner, name, number)): Path<(String, String, usize)>,
     Json(Assignees { assignees }): Json<Assignees>,
 ) -> Result<Json<IssueResponse>, GHError<'static>> {
-    let Some(_) = crate::github::auth_to_user(&tx, auth) else {
-        // TODO: ?
-        return Err(Error::Unauthenticated("").into_response(
-            "issues",
-            "assignees",
-            "add-assignees-to-an-issue",
-        ));
-    };
     let Some(issue_id) = prs::find_issue_id(&tx, &owner, &name, number) else {
         // TODO: what do you get if you try to add an assignee to a
         //       repo / id which does not exist?

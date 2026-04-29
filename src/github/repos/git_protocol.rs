@@ -20,7 +20,7 @@ use gix_pack::data::output::{Count, Entry as PackEntry};
 use headers::HeaderMap;
 use tracing::instrument;
 
-use crate::github::{Authorization, St};
+use crate::github::{St, auth};
 use crate::model::{Read, Token, Write};
 
 pub fn routes() -> Router<St> {
@@ -56,7 +56,7 @@ async fn check_repo_name(
 
 #[instrument(skip(tx))]
 async fn get_head(
-    _: Option<Authorization>,
+    _: Option<auth::GitAuth>,
     State(_): State<St>,
     tx: Token<Read>,
     Path((owner, name)): Path<(String, String)>,
@@ -68,7 +68,7 @@ async fn get_head(
 
 #[instrument(skip(tx))]
 async fn get_object(
-    _: Option<Authorization>,
+    _: Option<auth::GitAuth>,
     State(_): State<St>,
     tx: Token<Read>,
     Path((owner, name, s, ha)): Path<(String, String, String, String)>,
@@ -124,7 +124,7 @@ struct Service {
 #[allow(clippy::type_complexity)]
 #[instrument(skip(tx))]
 async fn git_refs(
-    auth: Option<Authorization>,
+    auth: Option<auth::GitAuth>,
     State(_): State<St>,
     tx: Token<Read>,
     Path((owner, name)): Path<(String, String)>,
@@ -351,7 +351,7 @@ static COMPONENT: percent_encoding::AsciiSet = percent_encoding::CONTROLS
 
 #[instrument(skip(st, tx))]
 async fn git_receive_pack(
-    auth: Authorization,
+    auth: Option<auth::GitAuth>,
     State(st): State<St>,
     tx: Token<Write>,
     Path((owner, name)): Path<(String, String)>,
@@ -360,7 +360,7 @@ async fn git_receive_pack(
     // FIXME: how is auth supposed to pass to receive-pack? The auth doesn't
     //        seem to be getting passed in which seems odd...
     // FIXME: differentiate between unauth and incorrect auth?
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
+    let Some(auth) = auth else {
         return (
             http::StatusCode::UNAUTHORIZED,
             [(http::header::WWW_AUTHENTICATE, "Basic realm=\"GitHub\"")],
@@ -483,6 +483,7 @@ async fn git_receive_pack(
         }
     }
 
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     for (branch, oid, forced) in updates {
         // Update PRs and send webhooks
         let branch: super::git::BranchRef = (repo.id, &branch);

@@ -401,14 +401,7 @@ async fn create_commit(
     Path((owner, name)): Path<(String, String)>,
     Json(req): Json<Value>,
 ) -> Result<(http::StatusCode, Json<super::Commit>), GHError<'static>> {
-    // TODO: test error when trying to hit this endpoint with invalid auth
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::NOT_FOUND.into_response(
-            "git",
-            "commits",
-            "create-a-commit",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
 
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
@@ -741,13 +734,7 @@ async fn update_ref(
     tx: Token<Write>,
     Json(req): Json<RefUpdateRequest>,
 ) -> Result<Json<RefResponse>, GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "git",
-            "refs",
-            "update-a-reference",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo) = crate::model::repos::by_name(&tx, &owner, &name) else {
         return Err(Error::NOT_FOUND.into_response(
             "git",
@@ -926,13 +913,7 @@ async fn delete_ref(
     Path((owner, name, ref_)): Path<(String, String, String)>,
     tx: Token<Write>,
 ) -> Result<http::StatusCode, GHError<'static>> {
-    let Some(user) = crate::github::auth_to_user(&tx, auth) else {
-        return Err(Error::Unauthenticated("").into_response(
-            "git",
-            "refs",
-            "delete-a-reference",
-        ));
-    };
+    let user = crate::model::users::get_actor_by_id(&tx, auth.actor);
     let Some(repo_id) = crate::model::repos::id_by_name(&tx, &owner, &name)
     else {
         return Err(Error::NOT_FOUND.into_response(
