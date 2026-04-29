@@ -21,9 +21,12 @@ must_use_candidate = "allow"
 async-graphql = { version = "*", default-features = false }
 async-graphql-axum = "*"
 axum = { version = "*", features = ["macros"] }
+# RSA keygen & sig verification, used by rustls which is used by reqwest
+aws-lc-rs = "*"
 base64 = "*"
 bon = "*"
 bytes = "*"
+chrono = "*"
 clap = { version = "*", features = ["derive"] }
 either = { version = "*", features = ["serde"] }
 flate2 = "*"

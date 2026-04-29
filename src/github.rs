@@ -41,6 +41,7 @@ use crate::model::users::{
 };
 use crate::model::{Read, Token, Write};
 
+mod auth;
 mod graphql;
 mod repos;
 

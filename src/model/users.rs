@@ -44,6 +44,7 @@ pub async fn load(
 pub enum Type {
     User,
     Organization,
+    Bot,
 }
 impl FromSql for Type {
     fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
@@ -63,6 +64,32 @@ impl std::ops::Deref for UserId {
     type Target = i64;
     fn deref(&self) -> &i64 {
         &self.0
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub struct InstallationId(pub i64);
+impl std::ops::Deref for InstallationId {
+    type Target = i64;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+#[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
+pub enum ActorId {
+    User(UserId),
+    Installation(InstallationId),
+}
+impl From<UserId> for ActorId {
+    fn from(value: UserId) -> Self {
+        Self::User(value)
+    }
+}
+impl From<InstallationId> for ActorId {
+    fn from(value: InstallationId) -> Self {
+        Self::Installation(value)
     }
 }
 
@@ -137,10 +164,38 @@ pub fn get_by_id<M>(tx: &Token<M>, id: UserId) -> User<'static> {
            ON (user = users.id AND \"primary\" AND visibility = 'public')
         WHERE id = ?
         ",
-        [id.0],
+        [*id],
         |row| row.try_into(),
     )
     .unwrap()
+}
+
+/// Gets a bot User from an Installation.
+pub fn get_by_install<M>(tx: &Token<M>, id: InstallationId) -> User<'static> {
+    tx.query_one(
+        "
+        SELECT user.id, login, type, name, email, default_branch
+        FROM installations
+        JOIN applications ON (applications.id = installations.application)
+        JOIN users ON (users.id = application.user)
+        LEFT JOIN emails
+           ON (user = users.id AND \"primary\" AND visibility = 'public')
+        WHERE installations.id = ?
+        ",
+        [*id],
+        |row| row.try_into(),
+    )
+    .unwrap()
+}
+
+/// Gets a user from an actor id (which can be either a user id or an installation id)
+pub fn get_actor_by_id<M>(tx: &Token<M>, id: ActorId) -> User<'static> {
+    match id {
+        ActorId::User(user_id) => get_by_id(tx, user_id),
+        ActorId::Installation(installation_id) => {
+            get_by_install(tx, installation_id)
+        }
+    }
 }
 
 /// Gets a User by their Id. Because i64 are arbitrary and may come from outside
