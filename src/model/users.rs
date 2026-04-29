@@ -54,6 +54,7 @@ impl FromSql for Type {
         Ok(match value.as_str()? {
             "user" => Type::User,
             "organization" => Type::Organization,
+            "bot" => Type::Bot,
             // should probably invalid value instead
             _ => return Err(FromSqlError::InvalidType),
         })

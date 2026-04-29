@@ -161,6 +161,10 @@ async fn load_users(p: &Path) -> Result<(), Box<dyn std::error::Error>> {
             match user.r#type {
                 github_types::users::UserType::User => "user",
                 github_types::users::UserType::Organization => "organization",
+                github_types::users::UserType::Bot => panic!(
+                    "Bot users are automatically generated when creating \
+                    applications, they should not be loaded from configuration"
+                ),
             },
             user.token,
             user.email,

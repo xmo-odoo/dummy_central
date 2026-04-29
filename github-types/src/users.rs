@@ -9,6 +9,7 @@ pub enum UserType {
     #[default]
     User,
     Organization,
+    Bot,
 }
 #[derive(Serialize, Default)]
 pub struct PublicUser {

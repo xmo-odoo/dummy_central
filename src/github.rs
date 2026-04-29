@@ -421,6 +421,7 @@ impl From<Type> for UserType {
         match t {
             Type::User => UserType::User,
             Type::Organization => UserType::Organization,
+            Type::Bot => UserType::Bot,
         }
     }
 }
@@ -551,6 +552,7 @@ async fn get_org(
                 r#type: match u.r#type {
                     Type::User => UserType::User,
                     Type::Organization => UserType::Organization,
+                    Type::Bot => UserType::Bot,
                 },
                 login: u.login.into_owned(),
                 name: u.name.map(Cow::into_owned),
