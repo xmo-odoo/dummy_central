@@ -66,6 +66,7 @@ tracing = "*"
 tracing-futures = "*"
 tracing-subscriber = "*"
 uuid = { version = "*", features = ["v4"] }
+url = "*"
 
 opentelemetry = { version = "*", optional = true }
 axum-tracing-opentelemetry = { version = "*", optional = true }

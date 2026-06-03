@@ -284,6 +284,12 @@ CREATE TABLE repository_webhooks (
     UNIQUE (repository, url)
 ) STRICT;
 
+CREATE TABLE applications_pending (
+    code blob not null primary key,
+    manifest blob not null,
+    expires_at integer not null default (unixepoch('now', '+1 hour'))
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE applications (
     id integer primary key,
     -- not bots
@@ -298,7 +304,7 @@ CREATE TABLE applications (
     -- bot user used for IAT interactions
     user integer not null references users (id),
 
-    client_id text not null,
+    client_id text not null unique,
 
     -- whether to redirect to the setup_url (default, if present)
     -- or callback_urls after an application is installed
@@ -306,7 +312,7 @@ CREATE TABLE applications (
     -- redo setup redirect (see above) on update
     setup_on_update integer not null default 0 check (setup_on_update in (0, 1)),
     -- can't be set if we require oauth authorization
-    setup_url text check (setup_url is null or not request_oauth_on_install),
+    setup_url text not null,
     -- must be set if we require oauth authorization
     callback_urls text check (callback_urls is not null or not request_oauth_on_install),
     -- device_flow integer not null default 0 check (device_flow in (0, 1)),
@@ -314,21 +320,22 @@ CREATE TABLE applications (
     webhook_active integer not null default 1 check (webhook_active in (0, 1)),
     webhook_url text check (webhook_active = 0 or webhook_url is not null),
     webhook_secret text,
-    events text
+    -- jsonb array
+    events blob
 ) STRICT;
 
 CREATE TABLE application_secrets (
-    application integer not null references applications (id),
+    application integer not null references applications (id) on delete cascade,
     value blob not null
 ) STRICT;
 
 CREATE TABLE application_keys (
-    application integer not null references applications (id),
-    public blob not null
+    application integer not null references applications (id) on delete cascade,
+    pubkey blob not null
 ) STRICT;
 
 CREATE TABLE permissions (
-    application integer not null references applications (id),
+    application integer not null references applications (id) on delete cascade,
     scope text not null,
     access text not null check (access in ('read', 'write')),
     primary key (application, scope)
@@ -336,7 +343,7 @@ CREATE TABLE permissions (
 
 CREATE TABLE installations (
     id integer primary key,
-    application integer not null references applications (id),
+    application integer not null references applications (id) on delete cascade,
     user integer not null references users (id),
     -- if the application requires no perms then this is not configured,
     -- if perms are added then update will be requested and will have
@@ -347,13 +354,13 @@ CREATE TABLE installations (
 
 -- note: repositories.owner should be the same value as installations.user...
 CREATE TABLE installation_repos (
-    installation integer not null references installations (id),
-    repository integer not null references repositories (id),
+    installation integer not null references installations (id) on delete cascade,
+    repository integer not null references repositories (id) on delete cascade,
     primary key (installation, repository)
 ) STRICT;
 
 CREATE TABLE installation_tokens (
-    installation integer not null references installations (id),
+    installation integer not null references installations (id) on delete cascade,
     expires_at integer not null default (unixepoch('now', '+1 hour')),
     -- TODO: repos, permissions: an IAT can have a tighter scope
     --       than the installation it's created from (maybe just
@@ -361,11 +368,18 @@ CREATE TABLE installation_tokens (
     value blob not null
 ) STRICT;
 
--- TODO: scoped tokens
+CREATE TABLE authorizations_pending (
+    code blob primary key,
+    application integer not null references installations (id) on delete cascade,
+    user integer not null references users (id) on delete cascade,
+    expires_at integer not null default (unixepoch('now', '+15 minutes'))
+) STRICT, WITHOUT ROWID;
+
 CREATE TABLE authorizations (
-    application integer not null references installations (id),
+    id integer primary key,
+    application integer not null references installations (id) on delete cascade,
     -- should only allow User
-    user integer not null references users (id),
+    user integer not null references users (id) on delete cascade,
     access_token blob not null,
     access_token_expires_at integer not null default (unixepoch('now', '+8 hours')),
     refresh_token blob not null,

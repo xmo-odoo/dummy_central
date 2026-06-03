@@ -22,15 +22,7 @@ use serde::Deserialize;
 
 use crate::model::{Read, Token};
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct AppId(pub(super) i64);
-impl std::ops::Deref for AppId {
-    type Target = i64;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
+pub use crate::github::app::db::AppId;
 
 /// Interaction is authenticated as an application
 #[derive(Debug)]

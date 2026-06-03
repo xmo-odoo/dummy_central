@@ -65,19 +65,8 @@ impl AuthState for Arc<crate::github::Config> {
         client_id: &str,
         client_secret: &str,
     ) -> Option<AppId> {
-        Token::<Read>::get()
-            .await
-            .ok()?
-            .query_one(
-                "
-                SELECT id
-                FROM applications
-                JOIN application_secrets ON (application = id)
-                WHERE client_id = ? AND value = ?
-                ",
-                (client_id, client_secret),
-                |row| row.get(0).map(AppId),
-            )
-            .ok()
+        Token::<Read>::get().await.ok().and_then(|tx| {
+            crate::github::app::db::id_by_secret(&tx, client_id, client_secret)
+        })
     }
 }

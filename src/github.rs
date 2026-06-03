@@ -37,6 +37,7 @@ use crate::model::users::{
 };
 use crate::model::{Read, Token, Write};
 
+mod app;
 mod auth;
 mod graphql;
 mod repos;
@@ -464,6 +465,7 @@ pub fn routes(st: Config) -> Router {
         .route("/rate_limit", get(rate_limit))
         .merge(graphql::routes())
         .merge(repos::routes())
+        .merge(app::routes())
         .fallback(|| async { Error::NOT_FOUND.into_response("reference", "", "") })
         .with_state(Arc::new(st))
 }
