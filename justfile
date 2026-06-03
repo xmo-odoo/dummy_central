@@ -13,6 +13,10 @@ lint:
 rlint:
     cargo clippy
 
+# looks for todo/fixme patterns in the code
+todo:
+    cargo clippy -- -A clippy::all -A unused -W clippy::todo -W clippy::unwrap_used -W clippy::dbg_macro
+    rg -o -r '$1' '((TODO|FIXME).*)'
 
 # validates the test suite against github actual, args are passed to pytest
 validate users *args:
