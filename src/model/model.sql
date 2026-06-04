@@ -267,22 +267,37 @@ CREATE TABLE review_comments (
     )
 ) STRICT;
 
--- not sure what the global webhook data model should be
-CREATE TABLE repository_webhooks (
+CREATE TABLE webhooks (
     id integer primary key,
-    repository integer not null references repositories on delete cascade,
+
+    application integer references applications on delete cascade,
+    repository integer references repositories on delete cascade,
+
     active integer not null default 1 check (active in (0, 1)),
     content_type text not null default 'form' check (content_type in ('json', 'form')),
     url text not null,
     events text not null default "push",
     insecure_ssl integer not null default 0 check (insecure_ssl in (0, 1)),
     secret text not null default "",
+
+    created_at integer not null default (unixepoch()),
+    updated_at integer not null default (unixepoch()),
+
+    UNIQUE (repository, url),
+    UNIQUE (application),
+    CHECK ((repository is null) != (application is null))
+) STRICT;
+
+CREATE TABLE repository_webhooks (
+    hook integer not null references webhooks on delete cascade,
+    repository integer not null references repositories on delete cascade,
+
     last_response_code integer,
     last_response_status text,
     last_response_message text,
 
-    UNIQUE (repository, url)
-) STRICT;
+    primary key (repository, hook)
+) STRICT, WITHOUT ROWID;
 
 CREATE TABLE applications_pending (
     code blob not null primary key,
@@ -314,28 +329,22 @@ CREATE TABLE applications (
     -- can't be set if we require oauth authorization
     setup_url text not null,
     -- must be set if we require oauth authorization
-    callback_urls text check (callback_urls is not null or not request_oauth_on_install),
+    callback_urls text check (callback_urls is not null or not request_oauth_on_install)
     -- device_flow integer not null default 0 check (device_flow in (0, 1)),
-
-    webhook_active integer not null default 1 check (webhook_active in (0, 1)),
-    webhook_url text check (webhook_active = 0 or webhook_url is not null),
-    webhook_secret text,
-    -- jsonb array
-    events blob
 ) STRICT;
 
 CREATE TABLE application_secrets (
-    application integer not null references applications (id) on delete cascade,
+    application integer not null references applications on delete cascade,
     value blob not null
 ) STRICT;
 
 CREATE TABLE application_keys (
-    application integer not null references applications (id) on delete cascade,
+    application integer not null references applications on delete cascade,
     pubkey blob not null
 ) STRICT;
 
 CREATE TABLE permissions (
-    application integer not null references applications (id) on delete cascade,
+    application integer not null references applications on delete cascade,
     scope text not null,
     access text not null check (access in ('read', 'write')),
     primary key (application, scope)
@@ -343,8 +352,8 @@ CREATE TABLE permissions (
 
 CREATE TABLE installations (
     id integer primary key,
-    application integer not null references applications (id) on delete cascade,
-    user integer not null references users (id),
+    application integer not null references applications on delete cascade,
+    user integer not null references users,
     -- if the application requires no perms then this is not configured,
     -- if perms are added then update will be requested and will have
     -- to configure either all repos or select at least one
@@ -354,13 +363,13 @@ CREATE TABLE installations (
 
 -- note: repositories.owner should be the same value as installations.user...
 CREATE TABLE installation_repos (
-    installation integer not null references installations (id) on delete cascade,
-    repository integer not null references repositories (id) on delete cascade,
+    installation integer not null references installations on delete cascade,
+    repository integer not null references repositories on delete cascade,
     primary key (installation, repository)
 ) STRICT;
 
 CREATE TABLE installation_tokens (
-    installation integer not null references installations (id) on delete cascade,
+    installation integer not null references installations on delete cascade,
     expires_at integer not null default (unixepoch('now', '+1 hour')),
     -- TODO: repos, permissions: an IAT can have a tighter scope
     --       than the installation it's created from (maybe just
@@ -370,16 +379,16 @@ CREATE TABLE installation_tokens (
 
 CREATE TABLE authorizations_pending (
     code blob primary key,
-    application integer not null references installations (id) on delete cascade,
-    user integer not null references users (id) on delete cascade,
+    application integer not null references applications on delete cascade,
+    user integer not null references users on delete cascade,
     expires_at integer not null default (unixepoch('now', '+15 minutes'))
 ) STRICT, WITHOUT ROWID;
 
 CREATE TABLE authorizations (
     id integer primary key,
-    application integer not null references installations (id) on delete cascade,
+    application integer not null references applications on delete cascade,
     -- should only allow User
-    user integer not null references users (id) on delete cascade,
+    user integer not null references users on delete cascade,
     access_token blob not null,
     access_token_expires_at integer not null default (unixepoch('now', '+8 hours')),
     refresh_token blob not null,

@@ -9,7 +9,8 @@ use crate::users::SimpleUser;
 #[derive(Serialize, Debug)]
 pub struct Webhook {
     pub sender: SimpleUser,
-    pub repository: MinimalRepository,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository: Option<MinimalRepository>,
     // TODO orgs without this?
     // organisation: MinimalOrganization
     // #[serde(skip_serializing_if = "Option::is_none")]
@@ -31,6 +32,8 @@ pub enum WebhookEvent {
     IssueComment(IssueComment),
     PullRequest(PullRequest),
     PullRequestReview(PullRequestReview),
+    Installation(Installation),
+    Authorization(Authorization),
 }
 impl WebhookEvent {
     pub fn name(&self) -> &'static str {
@@ -40,25 +43,50 @@ impl WebhookEvent {
             Self::IssueComment(_) => "issue_comment",
             Self::PullRequest(_) => "pull_request",
             Self::PullRequestReview(_) => "pull_request_review",
+            Self::Installation(_) => "installation",
+            Self::Authorization(_) => "github_app_authorization",
         }
     }
 }
 
 #[derive(Serialize, Clone, Debug)]
+pub enum HookType {
+    App,
+    Repository,
+    Organization,
+}
+
+#[derive(Serialize, Clone, Debug)]
+#[serde(rename_all = "snake_case")]
+pub enum HookName {
+    Web,
+}
+
+#[derive(Serialize, Clone, Debug)]
 pub struct Hook {
-    pub r#type: String, // Repository
+    pub r#type: HookType,
     pub id: i64,
-    pub name: String, // web
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub app_id: Option<i64>,
+    pub name: HookName,
     pub active: bool,
     pub events: BTreeSet<super::repos::HookEvent>,
     pub config: super::repos::CreateHookConfig,
     pub created_at: String,
     pub updated_at: String,
-    pub url: String,
-    pub test_url: String,
-    pub ping_url: String,
+    /// Hook config, only repo and org
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub url: Option<String>,
+    /// Not sure, but only repo
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub test_url: Option<String>,
+    /// Also not sure, repo and org
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub ping_url: Option<String>,
     pub deliveries_url: String,
-    pub last_response: LastResponse,
+    /// Apparently only repo
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_response: Option<LastResponse>,
 }
 
 #[derive(Serialize, Clone, Debug)]
@@ -154,6 +182,23 @@ pub struct PullRequestReview {
     pub action: ReviewAction,
     pub pull_request: super::pulls::PullRequestResponse,
     pub review: ReviewResponse,
+}
+
+#[derive(Serialize, Debug)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum Installation {
+    Created {
+        installation: crate::app::Installation,
+    },
+    Deleted {
+        installation: crate::app::Installation,
+    },
+}
+
+#[derive(Serialize, Debug)]
+#[serde(tag = "action", rename_all = "snake_case")]
+pub enum Authorization {
+    Revoked,
 }
 
 #[derive(Serialize, Debug)]

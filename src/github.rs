@@ -2,7 +2,6 @@
 # Straight pseudo-github implementation.
  */
 use std::borrow::Cow;
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use axum::extract::{Path, State};
@@ -78,7 +77,7 @@ pub struct HookConfig {
     pub active: bool,
     pub url: String,
     pub content_type: HookContentType,
-    pub events: HashSet<github_types::repos::HookEvent>,
+    pub events: std::collections::BTreeSet<github_types::repos::HookEvent>,
     pub secret: String,
     pub insecure_ssl: bool,
 }
@@ -119,9 +118,10 @@ impl Config {
         while let Some((conf, event, source)) = r.recv().await {
             {
                 let tx = Token::<Read>::get().await.unwrap();
-                let MinimalRepository { owner, name, .. } = &event.repository;
-                if crate::model::repos::id_by_name(&tx, &owner.login, name)
-                    .is_none()
+                if let Some(MinimalRepository { owner, name, .. }) =
+                    &event.repository
+                    && crate::model::repos::id_by_name(&tx, &owner.login, name)
+                        .is_none()
                 {
                     continue;
                 }

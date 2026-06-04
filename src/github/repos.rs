@@ -18,7 +18,7 @@ use smallvec::SmallVec;
 use tracing::{Span, instrument};
 
 use github_types::repos::*;
-use github_types::webhooks::{Webhook, WebhookEvent};
+use github_types::webhooks::{HookName, HookType, Webhook, WebhookEvent};
 
 use super::{GHError, HookConfig};
 use crate::github::{
@@ -42,6 +42,7 @@ pub fn send_hook<M, E: Fn() -> WebhookEvent>(
     sender: &super::User,
     event: E,
 ) {
+    // FIXME: how do app hooks work?
     for hook in crate::model::repos::list_hooks(tx, repo.id) {
         if hook.active && hook.events.iter().any(|e| e == &hook_type) {
             let _ = st.webhooks.send((
@@ -56,7 +57,7 @@ pub fn send_hook<M, E: Fn() -> WebhookEvent>(
                 },
                 Webhook {
                     sender: sender.to_simple(&st.root),
-                    repository: repo.to_response(tx, &st.root),
+                    repository: Some(repo.to_response(tx, &st.root)),
                     event: event(),
                 },
                 Span::current(),
@@ -406,9 +407,10 @@ async fn list_hooks(
         hooks
             .into_iter()
             .map(|h| Hook {
-                r#type: "Repository".into(),
+                r#type: HookType::Repository,
                 id: h.id,
-                name: "web".into(),
+                app_id: None,
+                name: HookName::Web,
                 active: h.active,
                 events: h.events.into_iter().collect(),
                 config: CreateHookConfig {
@@ -419,27 +421,27 @@ async fn list_hooks(
                 },
                 created_at: String::new(),
                 updated_at: String::new(),
-                url: format!(
+                url: Some(format!(
                     "{}/repos/{}/{}/hooks/{}",
                     st.root, owner, name, h.id
-                ),
-                test_url: format!(
+                )),
+                test_url: Some(format!(
                     "{}/repos/{}/{}/hooks/{}/test",
                     st.root, owner, name, h.id
-                ),
-                ping_url: format!(
+                )),
+                ping_url: Some(format!(
                     "{}/repos/{}/{}/hooks/{}/pings",
                     st.root, owner, name, h.id
-                ),
+                )),
                 deliveries_url: format!(
                     "{}/repos/{}/{}/hooks/{}/deliveries",
                     st.root, owner, name, h.id
                 ),
-                last_response: LastResponse {
+                last_response: Some(LastResponse {
                     code: h.last_response_code,
                     status: h.last_response_status,
                     message: h.last_response_message,
-                },
+                }),
             })
             .collect(),
     ))
@@ -463,9 +465,10 @@ async fn get_hook(
     // FIXME: should take the repo as input probably
     let h = crate::model::repos::get_hook(&tx, hook);
     Ok(Json(Hook {
-        r#type: "Repository".into(),
+        r#type: HookType::Repository,
         id: h.id,
-        name: "web".into(),
+        app_id: None,
+        name: HookName::Web,
         active: h.active,
         events: h.events.into_iter().collect(),
         config: CreateHookConfig {
@@ -476,24 +479,27 @@ async fn get_hook(
         },
         created_at: String::new(),
         updated_at: String::new(),
-        url: format!("{}/repos/{}/{}/hooks/{}", st.root, owner, name, h.id),
-        test_url: format!(
+        url: Some(format!(
+            "{}/repos/{}/{}/hooks/{}",
+            st.root, owner, name, h.id
+        )),
+        test_url: Some(format!(
             "{}/repos/{}/{}/hooks/{}/test",
             st.root, owner, name, h.id
-        ),
-        ping_url: format!(
+        )),
+        ping_url: Some(format!(
             "{}/repos/{}/{}/hooks/{}/pings",
             st.root, owner, name, h.id
-        ),
+        )),
         deliveries_url: format!(
             "{}/repos/{}/{}/hooks/{}/deliveries",
             st.root, owner, name, h.id
         ),
-        last_response: LastResponse {
+        last_response: Some(LastResponse {
             code: h.last_response_code,
             status: h.last_response_status,
             message: h.last_response_message,
-        },
+        }),
     }))
 }
 
@@ -568,9 +574,10 @@ async fn create_hook(
 
     use github_types::webhooks::{Hook, LastResponse};
     let hook = Hook {
-        r#type: "Repository".into(),
+        r#type: HookType::Repository,
         id: h.id,
-        name: "web".into(),
+        app_id: None,
+        name: HookName::Web,
         active: h.active,
         events: h.events.into_iter().collect(),
         config: CreateHookConfig {
@@ -581,30 +588,33 @@ async fn create_hook(
         },
         created_at: String::new(),
         updated_at: String::new(),
-        url: format!("{}/repos/{}/{}/hooks/{}", st.root, owner, name, h.id),
-        test_url: format!(
+        url: Some(format!(
+            "{}/repos/{}/{}/hooks/{}",
+            st.root, owner, name, h.id
+        )),
+        test_url: Some(format!(
             "{}/repos/{}/{}/hooks/{}/test",
             st.root, owner, name, h.id
-        ),
-        ping_url: format!(
+        )),
+        ping_url: Some(format!(
             "{}/repos/{}/{}/hooks/{}/pings",
             st.root, owner, name, h.id
-        ),
+        )),
         deliveries_url: format!(
             "{}/repos/{}/{}/hooks/{}/deliveries",
             st.root, owner, name, h.id
         ),
-        last_response: LastResponse {
+        last_response: Some(LastResponse {
             code: None,
             status: "unused".to_string().into(),
             message: None,
-        },
+        }),
     };
     let _ = st.webhooks.send((
         conf,
         Webhook {
             sender: SimpleUser::default(),
-            repository: repo.to_response(&tx, &st.root),
+            repository: Some(repo.to_response(&tx, &st.root)),
             event: WebhookEvent::Ping {
                 zen: String::new(),
                 hook_id: h.id,
@@ -660,9 +670,10 @@ async fn update_hook(
     use github_types::webhooks::{Hook, LastResponse};
     let h = crate::model::repos::get_hook(&tx, hook_id);
     let hook = Hook {
-        r#type: "Repository".into(),
+        r#type: HookType::Repository,
         id: h.id,
-        name: "web".into(),
+        app_id: None,
+        name: HookName::Web,
         active: h.active,
         events: h.events.into_iter().collect(),
         config: CreateHookConfig {
@@ -673,24 +684,27 @@ async fn update_hook(
         },
         created_at: String::new(),
         updated_at: String::new(),
-        url: format!("{}/repos/{}/{}/hooks/{}", st.root, owner, name, h.id),
-        test_url: format!(
+        url: Some(format!(
+            "{}/repos/{}/{}/hooks/{}",
+            st.root, owner, name, h.id
+        )),
+        test_url: Some(format!(
             "{}/repos/{}/{}/hooks/{}/test",
             st.root, owner, name, h.id
-        ),
-        ping_url: format!(
+        )),
+        ping_url: Some(format!(
             "{}/repos/{}/{}/hooks/{}/pings",
             st.root, owner, name, h.id
-        ),
+        )),
         deliveries_url: format!(
             "{}/repos/{}/{}/hooks/{}/deliveries",
             st.root, owner, name, h.id
         ),
-        last_response: LastResponse {
+        last_response: Some(LastResponse {
             code: h.last_response_code,
             status: h.last_response_status,
             message: h.last_response_message,
-        },
+        }),
     };
     tx.commit();
     Ok(Json(hook))

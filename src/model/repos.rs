@@ -257,6 +257,7 @@ pub fn find_fork<M>(
     .unwrap()
 }
 
+#[derive(Debug, Copy, Clone)]
 pub struct ContentType(pub HookContentType);
 impl From<ContentType> for HookContentType {
     fn from(c: ContentType) -> HookContentType {
@@ -282,6 +283,10 @@ pub struct Hook {
     pub events: BTreeSet<HookEvent>, // actually a set of events
     pub insecure_ssl: bool,
     pub secret: String,
+
+    pub created_at: chrono::DateTime<chrono::Utc>,
+    pub updated_at: chrono::DateTime<chrono::Utc>,
+
     pub last_response_code: Option<u16>,
     pub last_response_status: Option<String>,
     pub last_response_message: Option<String>,
@@ -303,10 +308,28 @@ impl TryFrom<&Row<'_>> for Hook {
                 .split(' ')
                 .filter_map(|s| s.parse().ok())
                 .collect(),
-            last_response_code: row.get("last_response_code")?,
-            last_response_status: row.get("last_response_status")?,
-            last_response_message: row.get("last_response_message")?,
+            created_at: row.get("created_at")?,
+            updated_at: row.get("updated_at")?,
+            last_response_code: row
+                .get("last_response_code")
+                .or_else(optional_column)?,
+            last_response_status: row
+                .get("last_response_status")
+                .or_else(optional_column)?,
+            last_response_message: row
+                .get("last_response_message")
+                .or_else(optional_column)?,
         })
+    }
+}
+
+fn optional_column<T>(
+    e: rusqlite::Error,
+) -> Result<Option<T>, rusqlite::Error> {
+    match e {
+        rusqlite::Error::InvalidColumnIndex(_) => Ok(None),
+        rusqlite::Error::InvalidColumnName(_) => Ok(None),
+        e => Err(e),
     }
 }
 
@@ -314,10 +337,14 @@ pub fn list_hooks<M>(tx: &Token<M>, repo: RepositoryId) -> Vec<Hook> {
     tx.prepare(
         "
         SELECT id, active, content_type, url, events, insecure_ssl, secret,
+            created_at, updated_at,
             last_response_code, last_response_status, last_response_message
-        FROM repository_webhooks
-        WHERE repository = ?
-    ",
+        FROM webhooks h
+        JOIN repository_webhooks r on (
+            h.id = r.hook AND h.repository = r.repository
+        )
+        WHERE h.repository = ?
+        ",
     )
     .unwrap()
     .query_map([*repo], |row| row.try_into())
@@ -330,8 +357,9 @@ pub fn get_hook<M>(tx: &Token<M>, id: i64) -> Hook {
     tx.query_row(
         "
         SELECT id, active, content_type, url, events, insecure_ssl, secret,
+            created_at, updated_at,
             last_response_code, last_response_status, last_response_message
-        FROM repository_webhooks
+        FROM webhooks join repository_webhooks on (id = hook)
         WHERE id = ?
     ",
         [id],
@@ -353,14 +381,14 @@ pub fn create_hook(
         ..
     }: &crate::github::HookConfig,
 ) -> Option<Hook> {
-    tx.query_row(
+    let mut hook: Hook = tx.query_row(
         "
-        INSERT INTO repository_webhooks
-            (repository, active, events, content_type, secret, url, insecure_ssl, last_response_status)
-        VALUES (?, ?, ?, ?, ?, ?, ?, 'unused')
+        INSERT INTO webhooks
+            (repository, active, events, content_type, secret, url, insecure_ssl)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         RETURNING id, active, content_type, url, events, insecure_ssl, secret,
-            last_response_code, last_response_status, last_response_message
-    ",
+                  created_at, updated_at;
+        ",
         (
             *repo,
             active,
@@ -373,7 +401,17 @@ pub fn create_hook(
         |row| row.try_into(),
     )
     .inspect_err(|e| assert!(e.sqlite_error_code() == Some(ConstraintViolation), "{e}"))
-    .ok()
+    .ok()?;
+    tx.execute(
+        "
+        INSERT INTO repository_webhooks (hook, repository, last_response_status)
+        VALUES (?, ?, 'unused')
+        ",
+        (hook.id, *repo),
+    )
+    .unwrap();
+    hook.last_response_status = Some("unused".to_owned());
+    Some(hook)
 }
 
 pub fn update_hook(
@@ -388,10 +426,11 @@ pub fn update_hook(
     1 == tx
         .execute(
             "
-        UPDATE repository_webhooks as w
+        UPDATE webhooks as w
         SET active = coalesce(?, active),
             secret = coalesce(?, secret),
-            events = coalesce(?, events)
+            events = coalesce(?, events),
+            updated_at = unixepoch()
         FROM repositories r, users u
         WHERE w.id = ?
           AND w.repository = r.id
@@ -418,7 +457,7 @@ pub fn hook_set_last_response(tx: &Token<Write>, hook: i64, code: u16) {
         SET last_response_code = ?,
             last_response_status = ?,
             last_response_message = ?
-        WHERE w.id = ?
+        WHERE w.hook = ?
         ",
         (
             code,
@@ -439,7 +478,7 @@ pub fn delete_hook(
     1 == tx
         .execute(
             "
-        DELETE FROM repository_webhooks
+        DELETE FROM webhooks
         WHERE id = ?
           AND repository in (
               SELECT r.id

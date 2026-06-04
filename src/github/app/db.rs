@@ -2,6 +2,7 @@ use crate::model::{Token, Write, users::UserId};
 use std::collections::HashMap;
 
 use aws_lc_rs::{encoding::AsDer as _, rsa::PrivateDecryptingKey};
+use itertools::Itertools as _;
 use rusqlite::{OptionalExtension as _, ToSql, named_params};
 use serde::{Deserialize, Serialize};
 
@@ -278,11 +279,7 @@ pub(crate) fn finalize(
             request_oauth_on_install,
             setup_on_update,
             setup_url,
-            callback_urls,
-            webhook_active,
-            webhook_url,
-            webhook_secret,
-            events
+            callback_urls
         )
         VALUES (
             :owner,
@@ -296,11 +293,7 @@ pub(crate) fn finalize(
             :request_oauth_on_install,
             :setup_on_update,
             :setup_url,
-            :callback_urls,
-            :webhook_active,
-            :webhook_url,
-            :webhook_secret,
-            jsonb(:events)
+            :callback_urls
         )
         RETURNING id
         ",
@@ -317,14 +310,17 @@ pub(crate) fn finalize(
                 ":setup_on_update": manifest.setup_on_update,
                 ":setup_url": manifest.setup_url,
                 ":callback_urls": manifest.callback_urls,
-                ":webhook_active": true,
-                ":webhook_url": manifest.webhook_url,
-                ":webhook_secret": &webhook_secret.as_simple().to_string(),
-                ":events": serde_json::to_string(&manifest.events).expect(""),
             },
             |row| row.get(0).map(AppId),
         )
         .unwrap();
+    tx.execute(
+        "
+        INSERT INTO webhooks (application, active, content_type, url, events, secret)
+        VALUES (?, 1, 'json', ?, ?, ?)
+        ",
+        (*appid, manifest.webhook_url, manifest.events.iter().join(" "), &webhook_secret.as_simple().to_string())
+    ).unwrap();
     tx.execute(
         "
         INSERT INTO application_secrets (application, value)
@@ -366,6 +362,24 @@ pub(crate) fn finalize(
         webhook_secret: webhook_secret.as_simple().to_string(),
         key: private_key,
     })
+}
+
+pub(crate) fn get_hook<M>(
+    tx: &Token<M>,
+    appid: AppId,
+) -> Option<crate::model::repos::Hook> {
+    tx.query_row(
+        "
+        SELECT id, active, content_type, url, events, insecure_ssl, secret,
+                created_at, updated_at
+        FROM webhooks
+        WHERE application = ?
+        ",
+        [*appid],
+        |row| row.try_into(),
+    )
+    .optional()
+    .unwrap()
 }
 
 pub(super) fn create_pending_authorization(
@@ -438,17 +452,37 @@ pub(super) fn list_installations<M>(
         .collect()
 }
 
+pub(super) fn get_installation<M>(
+    tx: &Token<M>,
+    installation_id: i64,
+) -> Option<UserId> {
+    tx.query_row(
+        "
+        SELECT user FROM installations WHERE id = ?
+        ",
+        [installation_id],
+        |row| row.get(0).map(UserId),
+    )
+    .optional()
+    .unwrap()
+}
+
 pub(super) fn delete_installation(
     tx: &Token<Write>,
     appid: AppId,
     installation_id: i64,
-) -> bool {
-    tx.execute(
-        "DELETE FROM installations WHERE application = ? AND id = ?",
+) -> Option<UserId> {
+    tx.query_row(
+        "
+        DELETE FROM installations
+        WHERE application = ? AND id = ?
+        RETURNING user
+        ",
         (*appid, installation_id),
+        |row| row.get(0).map(UserId),
     )
+    .optional()
     .unwrap()
-        != 0
 }
 
 pub(super) fn installation_token(
@@ -516,14 +550,17 @@ pub(crate) fn delete_authorization(
     tx: &Token<Write>,
     appid: AppId,
     raw_token: &str,
-) -> bool {
-    let Ok(token) = uuid::Uuid::try_parse(raw_token) else {
-        return false;
-    };
-    tx.execute(
-        "DELETE FROM authorizations WHERE application = ? AND access_token = ?",
+) -> Option<UserId> {
+    let token = uuid::Uuid::try_parse(raw_token).ok()?;
+    tx.query_one(
+        "
+        DELETE FROM authorizations
+        WHERE application = ? AND access_token = ?
+        RETURNING user
+        ",
         (*appid, token.as_bytes()),
+        |row| row.get(0).map(UserId),
     )
+    .optional()
     .unwrap()
-        != 0
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashMap, io::Write as _};
+use std::collections::HashMap;
 
 use aws_lc_rs::encoding::AsDer as _;
 use axum::{
@@ -7,13 +7,17 @@ use axum::{
     response::{IntoResponse as _, Response},
 };
 use base64::Engine as _;
-use github_types::users::{SimpleUser, UserType};
+use github_types::{
+    app::Installation,
+    users::SimpleUser,
+    webhooks::{Hook, HookType, Webhook, WebhookEvent},
+};
 use serde::{Deserialize, Serialize};
-use tracing::instrument;
+use tracing::{Span, instrument};
 
 use crate::{
     github::{
-        St,
+        HookConfig, St,
         auth::{ApplicationAuth, OAuthAuth, UserAuth},
     },
     model::{
@@ -51,6 +55,7 @@ struct Manifest {
     setup_on_update: bool,
 }
 
+// TODO: is this a full HookConfig, but with more secure defaults than repo?
 #[derive(Debug, Deserialize)]
 struct HookAttributes {
     url: String,
@@ -198,7 +203,65 @@ pub async fn finalize_app(
         .unwrap();
 
     let user = crate::model::users::get_by_id(&tx, appinfo.owner);
+    let hook = super::db::get_hook(&tx, appinfo.id);
     tx.commit();
+    if let Some(crate::model::repos::Hook {
+        id,
+        active,
+        content_type,
+        url,
+        events,
+        insecure_ssl,
+        ..
+    }) = hook
+    {
+        let secret = "********".to_owned();
+        st.webhooks
+            .send((
+                HookConfig {
+                    id,
+                    active,
+                    url: url.clone(),
+                    content_type: content_type.into(),
+                    events: events.iter().copied().collect(),
+                    secret: secret.clone(),
+                    insecure_ssl,
+                },
+                Webhook {
+                    sender: SimpleUser::default(),
+                    repository: None,
+                    event: WebhookEvent::Ping {
+                        zen: String::new(),
+                        hook_id: id,
+                        hook: Hook {
+                            r#type: HookType::App,
+                            id,
+                            app_id: Some(*appinfo.id),
+                            name: github_types::webhooks::HookName::Web,
+                            active,
+                            events: events.clone(),
+                            config: github_types::repos::CreateHookConfig {
+                                url: url.clone(),
+                                content_type: content_type.into(),
+                                secret,
+                                insecure_ssl,
+                            },
+                            created_at: String::new(),
+                            updated_at: String::new(),
+                            url: None,
+                            test_url: None,
+                            ping_url: None,
+                            deliveries_url:
+                                "https://api.github.com/app/hook/deliveries"
+                                    .to_string(),
+                            last_response: None,
+                        },
+                    },
+                },
+                Span::current(),
+            ))
+            .unwrap();
+    }
     Json(CreatedApp {
         id: *appinfo.id,
         description: appinfo.description.unwrap_or_default(),
@@ -257,6 +320,7 @@ pub struct InstallParams {
     // ? repository_id: Option<String> ?
 }
 pub async fn install_app(
+    State(st): State<St>,
     tx: Token<Write>,
     auth: UserAuth,
     Path(appslug): Path<String>,
@@ -270,15 +334,62 @@ pub async fn install_app(
         .filter(|u| !matches!(u.r#type, users::Type::Bot))
         .unwrap();
 
-    let installation_id =
-        super::db::install_into(&tx, appid, target.id).to_string();
+    let installation_id = super::db::install_into(&tx, appid, target.id);
 
-    // TODO: webhook
     let app = super::db::by_id(&tx, appid);
+
+    if let Some(crate::model::repos::Hook {
+        id,
+        active,
+        content_type,
+        url,
+        events,
+        insecure_ssl,
+        ..
+    }) = super::db::get_hook(&tx, appid)
+    {
+        let user = users::get_by_id(&tx, auth.user);
+        let target_id =
+            super::db::get_installation(&tx, installation_id).unwrap();
+        let target = users::get_by_id(&tx, target_id);
+        st.webhooks
+            .send((
+                HookConfig {
+                    id,
+                    active,
+                    url,
+                    content_type: content_type.into(),
+                    events,
+                    secret: "******".into(),
+                    insecure_ssl,
+                },
+                Webhook {
+                    sender: SimpleUser::for_login(&st.root, user.login.clone()),
+                    repository: None,
+                    event: WebhookEvent::Installation(
+                        github_types::webhooks::Installation::Created {
+                            installation: Installation {
+                                account: SimpleUser::for_login(
+                                    &st.root,
+                                    target.login,
+                                ),
+                                app_id: *appid,
+                                target_id: *target_id,
+                                target_type: target.r#type.into(),
+                                app_slug: app.slug,
+                            },
+                        },
+                    ),
+                },
+                Span::current(),
+            ))
+            .unwrap();
+    }
 
     let mut params = Vec::with_capacity(3);
     params.push(("setup_action", "install"));
-    params.push(("installation_id", &installation_id));
+    let iid = installation_id.to_string();
+    params.push(("installation_id", &iid));
     let code;
     let url = if app.request_oauth_on_install {
         // immediately starts an oauth flow
@@ -424,6 +535,7 @@ pub async fn check_token(
 }
 
 pub async fn delete_authorization(
+    State(st): State<St>,
     tx: Token<Write>,
     auth: OAuthAuth,
     Path(_): Path<String>,
@@ -433,7 +545,50 @@ pub async fn delete_authorization(
         return http::StatusCode::UNPROCESSABLE_ENTITY;
     };
     // TODO: test what happens if the client_id from the auth and path differ
-    if super::db::delete_authorization(&tx, auth.appid, &raw_token) {
+    if let Some(target_id) =
+        super::db::delete_authorization(&tx, auth.appid, raw_token)
+    {
+        if let Some(crate::model::repos::Hook {
+            id,
+            active,
+            content_type,
+            url,
+            events,
+            insecure_ssl,
+            ..
+        }) = super::db::get_hook(&tx, auth.appid)
+        {
+            // when the application revokes an authorization, the auth target
+            // is still the sender so can't differentiate between a user
+            // revoking an authorization and the app doing that, but since
+            // the sender is the only metadata it does allow nuking the auth
+            // record
+            let target = users::get_by_id(&tx, target_id);
+            st.webhooks
+                .send((
+                    HookConfig {
+                        id,
+                        active,
+                        url,
+                        content_type: content_type.into(),
+                        events,
+                        secret: "******".into(),
+                        insecure_ssl,
+                    },
+                    Webhook {
+                        sender: SimpleUser::for_login(
+                            &st.root,
+                            target.login.clone(),
+                        ),
+                        repository: None,
+                        event: WebhookEvent::Authorization(
+                            github_types::webhooks::Authorization::Revoked,
+                        ),
+                    },
+                    Span::current(),
+                ))
+                .unwrap();
+        }
         tx.commit();
         // TODO: token info
         http::StatusCode::OK
@@ -442,16 +597,6 @@ pub async fn delete_authorization(
     }
 }
 
-#[derive(Serialize)]
-pub struct Installation {
-    // id: i64,
-    account: SimpleUser,
-    app_id: i64,
-    target_id: i64,
-    target_type: UserType,
-    app_slug: String,
-    // ...
-}
 pub async fn list_installations(
     State(st): State<St>,
     auth: ApplicationAuth,
@@ -477,11 +622,65 @@ pub async fn list_installations(
     )
 }
 pub async fn delete_installation(
+    State(st): State<St>,
     tx: Token<Write>,
     auth: ApplicationAuth,
     Path(installation_id): Path<i64>,
 ) -> http::StatusCode {
-    if super::db::delete_installation(&tx, auth.appid, installation_id) {
+    if let Some(target_id) =
+        super::db::delete_installation(&tx, auth.appid, installation_id)
+    {
+        if let Some(crate::model::repos::Hook {
+            id,
+            active,
+            content_type,
+            url,
+            events,
+            insecure_ssl,
+            ..
+        }) = super::db::get_hook(&tx, auth.appid)
+        {
+            let app = super::db::by_id(&tx, auth.appid);
+            // when the application deletes an installation, the owner of the
+            // app is the sender (I'd kinda have expected the app itself)
+            let owner = users::get_by_id(&tx, app.owner);
+            let target = users::get_by_id(&tx, target_id);
+            st.webhooks
+                .send((
+                    HookConfig {
+                        id,
+                        active,
+                        url,
+                        content_type: content_type.into(),
+                        events,
+                        secret: "******".into(),
+                        insecure_ssl,
+                    },
+                    Webhook {
+                        sender: SimpleUser::for_login(
+                            &st.root,
+                            owner.login.clone(),
+                        ),
+                        repository: None,
+                        event: WebhookEvent::Installation(
+                            github_types::webhooks::Installation::Deleted {
+                                installation: Installation {
+                                    account: SimpleUser::for_login(
+                                        &st.root,
+                                        target.login,
+                                    ),
+                                    app_id: *auth.appid,
+                                    target_id: *target_id,
+                                    target_type: target.r#type.into(),
+                                    app_slug: app.slug,
+                                },
+                            },
+                        ),
+                    },
+                    Span::current(),
+                ))
+                .unwrap();
+        }
         tx.commit();
         http::StatusCode::ACCEPTED
     } else {
