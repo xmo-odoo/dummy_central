@@ -2,19 +2,20 @@ import base64
 import contextlib
 import itertools
 import json
-import queue
 import os
+import queue
 import random
 import subprocess
 import threading
 import time
-from wsgiref.simple_server import make_server, WSGIRequestHandler
+from wsgiref.simple_server import WSGIRequestHandler, make_server
 
-import github as pygithub
 import pytest
 import requests
 
-from . import make_branch, safe_delete, make_branchname
+import github as pygithub
+
+from . import make_branch, make_branchname, safe_delete
 
 # pygithub.enable_console_debug_logging()
 
@@ -211,12 +212,11 @@ def make_tunnel(_ngrok):
             r.raise_for_status()
         else:
             raise TimeoutError("ngrok tunnel deletion failed")
-        tunnels.remove(url)
 
     yield add
 
     while tunnels:
-        delete(tunnels[-1])
+        delete(tunnels.pop())
 
 
 class NoLoggingHandler(WSGIRequestHandler):
