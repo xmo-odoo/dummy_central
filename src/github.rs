@@ -409,6 +409,7 @@ impl User<'_> {
 impl From<User<'_>> for PublicUser {
     fn from(u: User<'_>) -> Self {
         PublicUser {
+            id: *u.id,
             login: u.login.into(),
             name: u.name.map(Into::into),
             email: u.email.map(Into::into),
