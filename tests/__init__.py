@@ -3,9 +3,9 @@ import secrets
 import time
 from itertools import islice
 
-import github
 import pytest
-import requests
+
+import github
 
 
 def _fib():
@@ -50,24 +50,24 @@ REPOS = pytest.StashKey[set]()
 
 
 def check(req, r, delete=True):
-    token = req.getfixturevalue('config')['token']
-    s = requests.Session()
-    s.headers['Authorization'] = f'token {token}'
     # wait up to ~2.5mn
     for t in islice(_fib(), 10):
         time.sleep(t)
-        if s.head(r.url).ok:
-            # sometimes gh says the repo is ready but it's not fully initialised and e.g.
-            # the branches list is empty or something
-            time.sleep(1)
-            if delete:
-                # avoid double-deleting repos when e.g. a fork is a no-op and returns the original repo
-                names = req.node.stash.setdefault(REPOS, set())
-                if r.full_name not in names:
-                    req.addfinalizer(lambda: safe_delete(r))
-                    names.add(r.full_name)
+        try:
+            r.update()
+        except github.GithubException:
+            continue
+        # sometimes gh says the repo is ready but it's not fully initialised and e.g.
+        # the branches list is empty or something
+        time.sleep(1)
+        if delete:
+            # avoid double-deleting repos when e.g. a fork is a no-op and returns the original repo
+            names = req.node.stash.setdefault(REPOS, set())
+            if r.full_name not in names:
+                req.addfinalizer(lambda: safe_delete(r))
+                names.add(r.full_name)
 
-            return r
+        return r
     raise Exception(f"Never saw resource {r.url!r}")
 
 
