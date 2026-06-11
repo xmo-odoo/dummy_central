@@ -1,0 +1,16 @@
+[project]
+name = "dummy-central"
+version = "0.1.0"
+description = "Project for running the tests of DC"
+requires-python = ">=3.10"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "flask",
+    "pygithub",
+    "pytest",
+    "requests",
+    "pyjwt",
+    "ruff",
+]

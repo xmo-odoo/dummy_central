@@ -3,11 +3,11 @@ default: format lint rlint test
 # formats the entire codebase
 format:
     cargo fmt
-    ruff format tests
+    uv run ruff format tests
 
 # runs python linting
 lint:
-    ruff check tests
+    uv run ruff check tests
 
 # runs rust linting
 rlint:
