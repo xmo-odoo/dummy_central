@@ -82,10 +82,7 @@ def users(pytestconfig, config):
 
 
 @pytest.fixture(scope="session")
-def github(users):
-    """
-    :rtype: github.Github
-    """
+def github(users) -> pygithub.Github:
     return users('base')
 
 
