@@ -119,7 +119,25 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
             html_url: String::new(),
             author: to_user(commit.author().unwrap()),
             committer: to_user(commit.committer().unwrap()),
-            files: vec![],
+            files: vec![DiffEntry {
+                sha: "abc".to_string(),
+                filename: "foo".to_string(),
+                status: DiffEntryStatus::Added,
+                additions: 1,
+                deletions: 0,
+                changes: 0,
+                blob_url: format!(
+                    "{}/{}/{}/blob/{}/{}",
+                    st.root, owner, name, oid, ""
+                ),
+                raw_url: format!(
+                    "{}/{}/{}/raw/{}/{}",
+                    st.root, owner, name, oid, ""
+                ),
+                contents_url: String::new(),
+                patch: None,
+                previous_filename: None,
+            }],
         }
     }
 }

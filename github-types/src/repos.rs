@@ -313,20 +313,21 @@ pub enum DiffEntryStatus {
 }
 #[derive(Serialize, Debug)]
 pub struct DiffEntry {
-    sha: String,
-    filename: String,
-    status: DiffEntryStatus,
-    additions: usize,
-    deletions: usize,
-    changes: usize,
-    blob_url: String,
-    raw_url: String,
-    contents_url: String,
+    pub sha: String,
+    pub filename: String,
+    pub status: DiffEntryStatus,
+    pub additions: usize,
+    pub deletions: usize,
+    pub changes: usize,
+    pub blob_url: String,
+    pub raw_url: String,
+    pub contents_url: String,
     /// unifified diff text for the change (TODO: when's it left out?
     /// Should this be `skip_serializing_if = String::is_empty`?)
-    patch: Option<String>,
+    pub patch: Option<String>,
     /// the previous filename, if the file was renamed (TODO: check)
-    previous_filename: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub previous_filename: Option<String>,
 }
 // I really only care about the `commit` bit anyway
 #[derive(Serialize, Debug)]
