@@ -88,7 +88,13 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
             commit: CommitsResponseCommit {
                 tree: Tree {
                     sha: commit.tree().to_string(),
-                    url: None,
+                    url: format!(
+                        "{}/repos/{}/{}/git/trees/{}",
+                        st.root,
+                        owner,
+                        name,
+                        commit.tree(),
+                    ),
                 },
                 message: String::from_utf8_lossy(commit.message.trim())
                     .to_string(),
@@ -1240,7 +1246,10 @@ async fn create_or_update_contents(
                     .to_string(),
                 tree: Tree {
                     sha: oid.to_string(),
-                    url: None,
+                    url: format!(
+                        "{}/repos/{}/{}/git/trees/{}",
+                        st.root, owner, name, oid,
+                    ),
                 },
                 parents: commit
                     .parents

@@ -278,7 +278,7 @@ pub struct Content {
 #[derive(Serialize, Debug)]
 pub struct Tree {
     pub sha: String,
-    pub url: Option<String>,
+    pub url: String,
 }
 #[derive(Serialize, Debug)]
 pub struct CommitLink {

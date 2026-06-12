@@ -363,7 +363,10 @@ async fn get_commit(
         message: String::from_utf8_lossy(commit.message.trim()).to_string(),
         tree: super::Tree {
             sha: commit.tree.to_string(),
-            url: None,
+            url: format!(
+                "{}/repos/{}/{}/git/trees/{}",
+                st.root, owner, name, commit.tree,
+            ),
         },
         parents: commit
             .parents
@@ -543,7 +546,10 @@ async fn create_commit(
             message: String::from_utf8_lossy(commit.message.trim()).to_string(),
             tree: super::Tree {
                 sha: commit.tree.to_string(),
-                url: None,
+                url: format!(
+                    "{}/repos/{}/{}/git/trees/{}",
+                    st.root, owner, name, commit.tree,
+                ),
             },
             parents: commit
                 .parents
