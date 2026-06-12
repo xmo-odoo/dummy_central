@@ -26,6 +26,7 @@ CREATE TABLE users (
     default_branch text not null default 'main'
 ) STRICT;
 
+-- WARNING: user ids relied on by `emails` default data
 INSERT INTO users (login, name, type)
 VALUES ('ghost', 'Deleted user', 'user'),
        ('web-flow', 'GitHub Web Flow', 'user');
@@ -42,6 +43,9 @@ CREATE TABLE emails (
 CREATE UNIQUE INDEX emails_unique_primary_per_user
     ON emails(user)
  WHERE "primary";
+
+INSERT INTO emails (email, user, "primary", visibility)
+VALUES ('noreply@github.com', last_insert_rowid(), 1, 'public');
 
 CREATE TABLE tokens (
     id integer primary key,

@@ -79,15 +79,8 @@ impl<'r, 's> From<Bundle<'r, 's>> for CommitsResponse {
         Bundle(st, tx, owner, name, oid, commit): Bundle<'r, 's>,
     ) -> CommitsResponse {
         let to_user = |u: SignatureRef<'_>| {
-            (u.email.as_bytes() == b"noreply@github.com")
-                .then(|| SimpleUser::for_login(&st.root, "web-flow".into()))
-                .or_else(|| {
-                    crate::model::users::get_user_from_email(
-                        tx,
-                        &u.email.to_string(),
-                    )
-                    .map(|u| u.to_simple(&st.root))
-                })
+            crate::model::users::get_user_from_email(tx, &u.email.to_string())
+                .map(|u| u.to_simple(&st.root))
         };
         Self {
             node_id: String::new(),
