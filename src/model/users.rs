@@ -70,6 +70,12 @@ impl std::ops::Deref for UserId {
         &self.0
     }
 }
+// kinda dubious without checking the schema?
+impl FromSql for UserId {
+    fn column_result(value: ValueRef<'_>) -> FromSqlResult<Self> {
+        value.as_i64().map(UserId)
+    }
+}
 
 #[derive(Copy, Clone, Debug, Hash, PartialEq, Eq)]
 pub struct InstallationId(pub i64);
@@ -178,12 +184,12 @@ pub fn get_by_id<M>(tx: &Token<M>, id: UserId) -> User<'static> {
 pub fn get_by_install<M>(tx: &Token<M>, id: InstallationId) -> User<'static> {
     tx.query_one(
         "
-        SELECT user.id, login, type, name, email, default_branch
+        SELECT u.id, u.login, u.type, u.name, emails.email, u.default_branch
         FROM installations
         JOIN applications ON (applications.id = installations.application)
-        JOIN users ON (users.id = application.user)
+        JOIN users as u ON (u.id = applications.user)
         LEFT JOIN emails
-           ON (user = users.id AND \"primary\" AND visibility = 'public')
+           ON (emails.user = u.id AND \"primary\" AND visibility = 'public')
         WHERE installations.id = ?
         ",
         [*id],

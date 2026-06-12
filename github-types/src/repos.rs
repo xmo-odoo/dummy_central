@@ -654,6 +654,7 @@ pub struct CreateBranchMerge {
 #[derive(Serialize)]
 pub struct Deployment {
     pub id: i64,
+    pub url: String,
 }
 
 #[derive(Serialize)]

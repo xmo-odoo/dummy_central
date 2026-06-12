@@ -1500,9 +1500,21 @@ async fn create_branch_merge(
     ))
 }
 
-#[instrument]
-async fn create_deployment() -> (StatusCode, Json<Deployment>) {
-    (StatusCode::CREATED, Json(Deployment { id: 1 }))
+#[instrument(skip(st))]
+async fn create_deployment(
+    State(st): State<St>,
+    Path((owner, name)): Path<(String, String)>,
+) -> (StatusCode, Json<Deployment>) {
+    (
+        StatusCode::CREATED,
+        Json(Deployment {
+            id: 1,
+            url: format!(
+                "{}/repos/{}/{}/deployments/{}",
+                st.root, owner, name, 1
+            ),
+        }),
+    )
 }
 
 #[instrument]

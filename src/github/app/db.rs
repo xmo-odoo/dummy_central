@@ -442,11 +442,11 @@ pub(super) fn validate_pending_authorization(
 pub(super) fn list_installations<M>(
     tx: &Token<M>,
     appid: AppId,
-) -> Vec<UserId> {
+) -> Vec<(i64, UserId)> {
     let mut stmt = tx
-        .prepare("SELECT user FROM installations WHERE application = ?")
+        .prepare("SELECT id, user FROM installations WHERE application = ?")
         .unwrap();
-    stmt.query_map([*appid], |row| row.get(0).map(UserId))
+    stmt.query_map([*appid], |row| row.try_into())
         .unwrap()
         .map(Result::unwrap)
         .collect()
@@ -471,15 +471,15 @@ pub(super) fn delete_installation(
     tx: &Token<Write>,
     appid: AppId,
     installation_id: i64,
-) -> Option<UserId> {
+) -> Option<(i64, UserId)> {
     tx.query_row(
         "
         DELETE FROM installations
         WHERE application = ? AND id = ?
-        RETURNING user
+        RETURNING id, user
         ",
         (*appid, installation_id),
-        |row| row.get(0).map(UserId),
+        |row| row.try_into(),
     )
     .optional()
     .unwrap()

@@ -369,6 +369,7 @@ pub async fn install_app(
                     event: WebhookEvent::Installation(
                         github_types::webhooks::Installation::Created {
                             installation: Installation {
+                                id: installation_id,
                                 app_id: *appid,
                                 target_id: *target_id,
                                 target_type: target.r#type.into(),
@@ -402,7 +403,7 @@ pub async fn install_app(
             // the installation.created webhook (which is what it should trust
             // anyway)
             params.clear();
-            &format!("/settings/installations/{installation_id}")
+            &format!("{}/settings/installations/{installation_id}", st.root)
         } else {
             &app.setup_url
         }
@@ -602,9 +603,10 @@ pub async fn list_installations(
     Json(
         accounts
             .into_iter()
-            .map(|uid| {
+            .map(|(id, uid)| {
                 let user = users::get_by_id(&tx, uid);
                 Installation {
+                    id,
                     app_id: *app.id,
                     target_id: *uid,
                     target_type: user.r#type.into(),
@@ -621,7 +623,7 @@ pub async fn delete_installation(
     auth: ApplicationAuth,
     Path(installation_id): Path<i64>,
 ) -> http::StatusCode {
-    if let Some(target_id) =
+    if let Some((iid, target_id)) =
         super::db::delete_installation(&tx, auth.appid, installation_id)
     {
         if let Some(crate::model::repos::Hook {
@@ -656,6 +658,7 @@ pub async fn delete_installation(
                         event: WebhookEvent::Installation(
                             github_types::webhooks::Installation::Deleted {
                                 installation: Installation {
+                                    id: iid,
                                     app_id: *auth.appid,
                                     target_id: *target_id,
                                     target_type: target.r#type.into(),
@@ -676,7 +679,7 @@ pub async fn delete_installation(
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Debug)]
 pub struct InstallationToken {
     token: String,
     expires_at: String,
@@ -684,10 +687,20 @@ pub struct InstallationToken {
     // repository_selection: enum  { Selected, ??? }
     // repositories: Vec<looks like RepositoryResponse but doesn't match>
 }
+#[derive(Deserialize, Debug)]
+pub struct InstallationTokenRequest {
+    #[serde(default)]
+    repositories: Vec<String>,
+    #[serde(default)]
+    repository_ids: Vec<i64>,
+    #[serde(default)]
+    permissions: HashMap<String, Permission>,
+}
 pub async fn create_iat(
     tx: Token<Write>,
     auth: ApplicationAuth,
     Path(installation_id): Path<i64>,
+    Json(_): Json<InstallationTokenRequest>,
 ) -> Json<InstallationToken> {
     let token = uuid::Uuid::new_v4();
     let Some(expiry) =
