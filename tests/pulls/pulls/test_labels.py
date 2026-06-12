@@ -9,7 +9,7 @@ def _reset_labels(pr):
 def det(labels):
     return [
         {k: label[k] for k in ['color', 'default', 'description', 'name']}
-        for label in labels
+        for label in sorted(labels, key=lambda label: label['name'])
     ]
 
 
@@ -64,7 +64,7 @@ def test_add_strings(pr, session):
         json=["bar"],
     )
     assert r.ok, r.text
-    assert det(r.json()) == [default('test'), default('bar')]
+    assert det(r.json()) == [default('bar'), default('test')]
 
 
 def test_add_labels(pr, session):
