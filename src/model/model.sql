@@ -350,6 +350,9 @@ CREATE TABLE application_keys (
 CREATE TABLE permissions (
     application integer not null references applications on delete cascade,
     scope text not null,
+    -- technically, there's a handful of permissions with just read, just write,
+    -- or read, write, and admin *however* they're mostly org perms which we
+    -- don't care about (yet?)
     access text not null check (access in ('read', 'write')),
     primary key (application, scope)
 ) STRICT;
@@ -378,7 +381,13 @@ CREATE TABLE installation_tokens (
     -- TODO: repos, permissions: an IAT can have a tighter scope
     --       than the installation it's created from (maybe just
     --       copy and restrict so the checking code is uniform?)
-    value blob not null
+    value blob not null UNIQUE
+) STRICT;
+
+CREATE TABLE installation_token_permissions (
+    token blob not null references installation_tokens (value) on delete cascade,
+    scope text not null,
+    access text not null check (access in ('read', 'write'))
 ) STRICT;
 
 CREATE TABLE authorizations_pending (
