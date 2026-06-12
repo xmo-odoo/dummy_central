@@ -1,5 +1,3 @@
-use std::borrow::Cow;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(
@@ -54,7 +52,7 @@ pub struct SimpleUser {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub email: Option<String>,
     pub login: String,
-    //    pub id: u64,
+    pub id: i64,
     //    pub node_id: String,
     //    pub avatar_url: String,
     //    pub gravatar_id: Option<String>,
@@ -75,13 +73,6 @@ pub struct SimpleUser {
 impl SimpleUser {
     pub fn url(root: &str, login: &str) -> String {
         format!("{root}/users/{login}")
-    }
-    pub fn for_login(root: &str, login: Cow<'_, str>) -> Self {
-        Self {
-            url: Self::url(root, &login),
-            login: login.into_owned(),
-            ..Self::default()
-        }
     }
 }
 

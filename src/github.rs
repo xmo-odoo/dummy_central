@@ -389,6 +389,7 @@ impl<'e> Error<'e> {
 impl User<'_> {
     fn to_simple(&self, root: &str) -> SimpleUser {
         SimpleUser {
+            id: *self.id,
             url: SimpleUser::url(root, &self.login),
             email: self.email.clone().map(Into::into),
             login: self.login.clone().into(),
@@ -398,6 +399,7 @@ impl User<'_> {
     }
     fn into_simple(self, root: &str) -> SimpleUser {
         SimpleUser {
+            id: *self.id,
             url: SimpleUser::url(root, &self.login),
             email: self.email.map(Into::into),
             login: self.login.into(),
@@ -549,7 +551,7 @@ async fn get_org(
         })
         .map(|u| {
             Json(OrganizationFull {
-                id: 0,
+                id: *u.id,
                 node_id: String::new(),
                 url: format!("{}/orgs/{}", st.root, u.login),
                 r#type: match u.r#type {

@@ -265,7 +265,7 @@ pub async fn finalize_app(
     Json(CreatedApp {
         id: *appinfo.id,
         description: appinfo.description.unwrap_or_default(),
-        owner: SimpleUser::for_login(&st.root, user.login.into()),
+        owner: user.into_simple(&st.root),
         external_url: appinfo.url,
         html_url: format!("https://github.com/apps/{}", appinfo.slug),
         permissions: appinfo
@@ -364,18 +364,15 @@ pub async fn install_app(
                     insecure_ssl,
                 },
                 Webhook {
-                    sender: SimpleUser::for_login(&st.root, user.login.clone()),
+                    sender: user.into_simple(&st.root),
                     repository: None,
                     event: WebhookEvent::Installation(
                         github_types::webhooks::Installation::Created {
                             installation: Installation {
-                                account: SimpleUser::for_login(
-                                    &st.root,
-                                    target.login,
-                                ),
                                 app_id: *appid,
                                 target_id: *target_id,
                                 target_type: target.r#type.into(),
+                                account: target.into_simple(&st.root),
                                 app_slug: app.slug,
                             },
                         },
@@ -528,7 +525,7 @@ pub async fn check_token(
                     .to_owned(),
                 token: access_token,
                 url: format!("{}/authorizations/{}", &st.root, auth.id),
-                user: SimpleUser::for_login(&st.root, user.login.into()),
+                user: user.into_simple(&st.root),
             })
         })
         .ok_or(http::StatusCode::NOT_FOUND)
@@ -576,10 +573,7 @@ pub async fn delete_authorization(
                         insecure_ssl,
                     },
                     Webhook {
-                        sender: SimpleUser::for_login(
-                            &st.root,
-                            target.login.clone(),
-                        ),
+                        sender: target.into_simple(&st.root),
                         repository: None,
                         event: WebhookEvent::Authorization(
                             github_types::webhooks::Authorization::Revoked,
@@ -611,10 +605,10 @@ pub async fn list_installations(
             .map(|uid| {
                 let user = users::get_by_id(&tx, uid);
                 Installation {
-                    account: SimpleUser::for_login(&st.root, user.login.into()),
                     app_id: *app.id,
                     target_id: *uid,
                     target_type: user.r#type.into(),
+                    account: user.into_simple(&st.root),
                     app_slug: app.slug.clone(),
                 }
             })
@@ -657,21 +651,15 @@ pub async fn delete_installation(
                         insecure_ssl,
                     },
                     Webhook {
-                        sender: SimpleUser::for_login(
-                            &st.root,
-                            owner.login.clone(),
-                        ),
+                        sender: owner.into_simple(&st.root),
                         repository: None,
                         event: WebhookEvent::Installation(
                             github_types::webhooks::Installation::Deleted {
                                 installation: Installation {
-                                    account: SimpleUser::for_login(
-                                        &st.root,
-                                        target.login,
-                                    ),
                                     app_id: *auth.appid,
                                     target_id: *target_id,
                                     target_type: target.r#type.into(),
+                                    account: target.into_simple(&st.root),
                                     app_slug: app.slug,
                                 },
                             },

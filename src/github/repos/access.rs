@@ -243,20 +243,14 @@ async fn get_collaborator_permission(
                     Permission {
                         permission,
                         role_name,
-                        user: github_types::users::SimpleUser::for_login(
-                            &st.root,
-                            (&login).into(),
-                        ),
+                        user: user.to_simple(&st.root),
                     }
                 })
             })
             .unwrap_or_else(|| Permission {
                 permission: LegacyRole::Read,
                 role_name: RoleName::Read,
-                user: github_types::users::SimpleUser::for_login(
-                    &st.root,
-                    login.into(),
-                ),
+                user: user.into_simple(&st.root),
             }),
     ))
 }
