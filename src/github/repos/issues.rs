@@ -16,6 +16,7 @@ use crate::github::repos::send_hook;
 use crate::github::{
     Authorization, Config, Error, GHError, GithubErrorDetails, St,
 };
+use crate::model::prs::IssueId;
 use crate::model::repos::id_by_name;
 use crate::model::users::{self, User};
 use crate::model::{Read, Write};
@@ -26,6 +27,7 @@ use crate::model::{
 
 #[derive(Debug)]
 pub struct Issue {
+    pub id: IssueId,
     pub number: usize,
     // created_at: datetime
     // updated_at: datetime
@@ -82,36 +84,8 @@ impl IssueComment<'_> {
         }
     }
 }
-type PrRow = (usize, String, String, Option<String>, Vec<u8>, String);
 
 impl Issue {
-    fn from_row(r: PrRow) -> Self {
-        Self {
-            number: r.0,
-            state: if r.1 == "open" {
-                IssueState::Open
-            } else {
-                IssueState::Closed
-            },
-            title: r.2,
-            body: r.3,
-            user: None,
-            labels: Vec::new(),
-            author_association: AuthorAssociation::None,
-            assignees: Vec::new(),
-            comments: Vec::new(),
-            pull_request: None,
-            //pull_request: Some(PullRequest {
-            //    base: r.5,
-            //    head: Head {
-            //        sha: r.4.encode_hex(),
-            //       r#ref: String::new(),
-            //        Path(owner): Path<String>::new(),
-            //         repo: Arc::new
-            //    }
-            //})
-        }
-    }
     fn into_response(
         self,
         root: &str,
@@ -119,7 +93,7 @@ impl Issue {
         name: &str,
     ) -> IssueResponse {
         IssueResponse {
-            id: 0,
+            id: *self.id,
             node_id: String::new(),
             _urls: IssueResponseUrls {
                 url: format!(
@@ -1553,6 +1527,7 @@ async fn create_issue_comment(
     let repo_id = repo.id;
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {
         let mut issue_response = Issue {
+            id: issue.id,
             number: issue.number,
             user: issue.user.clone(),
             state: match issue.state {
@@ -1688,6 +1663,7 @@ async fn update_issue_comment(
     let repo_id = repo.id;
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {
         let mut issue_response = Issue {
+            id: issue.id,
             number: issue.number,
             user: issue.user.clone(),
             state: match issue.state {
@@ -1757,6 +1733,7 @@ async fn delete_issue_comment(
     let repo_id = repo.id;
     send_hook(&tx, repo, &st, HookEvent::IssueComment, &user, || {
         let mut issue_response = Issue {
+            id: issue.id,
             number: issue.number,
             user: issue.user.clone(),
             state: match issue.state {
