@@ -1,4 +1,4 @@
-# DummyCentral: a fake git hub 1
+# DummyCentral: a fake git hub 2
 
 ## Purpose
 
